@@ -21,6 +21,12 @@ CHECKSUM_DIR = os.path.join(PROCESSED_DATA_DIR, "checksums")
 # Vector store persistence directory
 CHROMA_PERSIST_DIR = os.path.join(BASE_DIR, "chroma_store")
 
+# Prompts directory
+PROMPTS_DIR = os.path.join(BASE_DIR, "src", "prompts")
+
+# Model cache directory
+MODELS_CACHE_DIR = os.path.join(BASE_DIR, "models_cache")
+
 # --- Pipeline Settings ---
 # Settings for document chunking
 CHUNK_SIZE = 1000
@@ -31,5 +37,5 @@ TOP_K = 5
 
 # --- Models ---
 # Names of the models to be used for LLM and embeddings
-LLM_MODEL = "llama3-8b-8192"  # Example: Using a Groq model
+LLM_MODEL = "llama-3.1-8b-instant"  # Example: Using a Groq model
 EMBEDDING_MODEL = "text-embedding-3-small"
