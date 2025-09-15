@@ -99,7 +99,27 @@ pip install -r requirements.txt
 
 ### 4. Add Your Documents
 
-Place the documents you want to query into the `data/raw/` directory.
+Place your source files in the `data/raw/` directory. Supported formats: `.pdf`, `.docx`, `.txt`.
+
+### 5. Index a Document
+
+Use the CLI to index a document:
+
+```bash
+python -m src.main index --file advanced-rag-interview-prep.pdf
+```
+
+This will ingest, chunk, and embed the document, storing results in the vector store.
+
+### 6. Query the System
+
+Ask questions using the CLI:
+
+```bash
+python -m src.main query "What is Retrieval-Augmented Generation?"
+```
+
+The system will retrieve relevant chunks and generate an answer using the LLM.
 
 ---
 
@@ -131,16 +151,33 @@ python main.py query "Summarize the key points from the final chapter."
 
 ---
 
-## 🔧 Customization
+## 🛠️ Troubleshooting
 
-- **Change LLM or Embedding Model:**  
-  Modify `LLM_MODEL` and `EMBEDDING_MODEL` in `src/config.py`. Update client initialization in `src/llm.py` or `src/embed_store.py` if changing providers (e.g., Groq to Anthropic).
-
-- **Add New Document Loaders:**  
-  To support new file types (e.g., `.md`, `.csv`), update the `_get_loader` function in `src/ingest.py` with the appropriate LangChain document loader.
-
-- **Adjust Chunking Strategy:**  
-  Change `CHUNK_SIZE` and `CHUNK_OVERLAP` in `src/config.py` to optimize retrieval for your documents.
+- Ensure your `.env` file contains valid API keys.
+- If you change a document, re-run the `index` command to update the vector store.
+- If you see errors about missing vector store, run `index` first.
+- For GPU acceleration, ensure PyTorch is installed with CUDA support.
 
 ---
 
+## 🤝 Contributing
+
+Contributions are welcome! Please:
+- Fork the repository
+- Create a feature branch
+- Submit a pull request with a clear description
+- Ensure your code is well-documented and tested
+
+---
+
+## 📚 References
+
+- [LangChain](https://python.langchain.com/)
+- [ChromaDB](https://www.trychroma.com/)
+- [Groq](https://groq.com/)
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License.

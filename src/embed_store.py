@@ -1,3 +1,13 @@
+"""
+embed_store.py
+
+Manages embedding model initialization and vector store operations for the RAG pipeline.
+Provides functions to build, load, and query the Chroma vector store using HuggingFace embeddings.
+
+Usage:
+    Use this module to create or load vector stores and retrieve relevant document chunks for queries.
+"""
+
 import os
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
@@ -10,7 +20,13 @@ from src.config import (
 
 
 def get_embedding_model():
-    """Initializes and returns the Hugging Face embedding model."""
+    """
+    Initializes and returns the Hugging Face embedding model for document chunk embedding.
+    Automatically selects GPU (CUDA) if available, otherwise uses CPU.
+
+    Returns:
+        HuggingFaceEmbeddings instance or None if loading fails.
+    """
     import torch  # Import torch to check for CUDA availability
 
     model_name = "sentence-transformers/all-MiniLM-L6-v2"

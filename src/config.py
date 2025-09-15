@@ -1,3 +1,12 @@
+"""
+config.py
+
+Centralized configuration management for the RAG pipeline. Handles environment variables, YAML config loading, logging setup, API keys, and directory paths.
+
+Usage:
+    Import settings and logger from this module for consistent configuration across the project.
+"""
+
 import os
 import yaml
 import logging

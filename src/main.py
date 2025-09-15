@@ -1,3 +1,12 @@
+"""
+main.py
+
+Command-line entry point for the RAG pipeline. Handles document indexing and querying via CLI commands.
+Coordinates ingestion, embedding, retrieval, and LLM-based answer generation.
+
+Usage:
+    Run this module as a script to index documents or query the RAG system.
+"""
 import argparse
 import sys
 import os
@@ -12,7 +21,12 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
 def handle_index(file_name):
-    """Handles the 'index' command."""
+    """
+    Handles the 'index' CLI command to ingest and index a document.
+
+    Args:
+        file_name (str): Name or path of the document to index.
+    """
     if not os.path.isabs(file_name):
         file_path = os.path.join(RAW_DATA_DIR, file_name)
     else:
@@ -30,14 +44,24 @@ def handle_index(file_name):
         logger.warning("Indexing skipped as the document has not changed or failed to process.")
 
 def load_prompt_template():
-    """Loads the RAG prompt template from the YAML file."""
+    """
+    Loads the RAG prompt template from the YAML file in the prompts directory.
+
+    Returns:
+        str: The prompt template string.
+    """
     prompt_path = os.path.join(PROMPTS_DIR, "rag_prompts.yaml")
     with open(prompt_path, 'r') as f:
         prompt_config = yaml.safe_load(f)
     return prompt_config['template']
 
 def handle_query(question):
-    """Handles the 'query' command."""
+    """
+    Handles the 'query' CLI command to answer a question using the indexed documents and LLM.
+
+    Args:
+        question (str): The user's question.
+    """
     logger.info(f"Received query: '{question}'")
     vectordb = load_vector_store()
     if not vectordb:

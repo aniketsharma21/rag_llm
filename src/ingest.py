@@ -1,3 +1,13 @@
+"""
+ingest.py
+
+Handles document ingestion, chunking, and checksum management for the RAG pipeline.
+Supports PDF, Word, and text files. Ensures only changed documents are reprocessed.
+
+Usage:
+    Use process_document(file_path) to ingest and chunk documents, with automatic checksum verification.
+"""
+
 # src/ingest.py
 import os
 import pickle
@@ -14,7 +24,15 @@ from src.config import (
 )
 
 def _get_loader(file_path):
-    """Selects the appropriate document loader based on file extension."""
+    """
+    Selects the appropriate document loader based on file extension.
+    Args:
+        file_path (str): Path to the document file.
+    Returns:
+        Document loader instance.
+    Raises:
+        ValueError: If file type is unsupported.
+    """
     _, ext = os.path.splitext(file_path)
     ext = ext.lower()
     if ext == ".pdf":
