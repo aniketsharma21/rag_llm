@@ -1,13 +1,13 @@
 # Core Dependencies
 fastapi>=0.104.1
 uvicorn[standard]>=0.24.0
-python-multipart>=0.0.6
+python-multipart==0.0.9
 python-dotenv>=1.0.0
 pydantic>=2.4.2
 pydantic-settings>=2.0.3
 
 # WebSocket
-websockets>=12.0
+websockets==12.0
 python-socketio>=5.10.0
 
 # LangChain and LLM
@@ -39,7 +39,3 @@ mypy>=1.7.0
 
 # CORS
 fastapi-cors>=0.0.6
-async-timeout==4.0.3
-backoff==2.2.1
-banks==2.2.0
-blessed==1.20.0

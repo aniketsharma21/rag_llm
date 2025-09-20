@@ -1,183 +1,268 @@
 # 🚀 Enterprise-Ready RAG Pipeline
 
-A robust, modular, and production-oriented framework for building Retrieval-Augmented Generation (RAG) applications. Designed for enterprise use cases, emphasizing configuration-driven design, cost-efficiency, and extensibility.
+A robust, modular, and production-oriented framework for building Retrieval-Augmented Generation (RAG) applications. Features a FastAPI backend and React frontend, designed for enterprise use cases with configuration-driven design, cost-efficiency, and extensibility.
 
----
+## 🌟 Features
 
-## 🧩 Overview
+### Backend
+- **Document Processing**
+  - Supports multiple formats: PDF, DOCX, TXT
+  - Smart chunking with configurable parameters
+  - Checksum verification to avoid redundant processing
+  
+- **Vector Storage**
+  - Persistent storage with ChromaDB
+  - Efficient similarity search
+  - Automatic embedding generation
+  
+- **LLM Integration**
+  - Powered by Groq for fast inference
+  - Configurable models and parameters
+  - Support for different LLM providers
+  
+- **API Layer**
+  - RESTful API with FastAPI
+  - WebSocket support for real-time updates
+  - Comprehensive API documentation
 
-The pipeline:
-- Ingests various document types
-- Creates vector embeddings
-- Stores them efficiently
-- Uses a Large Language Model (LLM) to answer questions based on retrieved context
+### Frontend
+- **Modern React Interface**
+  - Clean, responsive design
+  - Real-time chat interface
+  - Document upload and management
+  - Conversation history
 
----
+## 🏗️ Project Structure
 
-## ✅ Key Features
-
-- **Modular Design:** Each logical step (ingest, embed, retrieve, generate) is separated into its own module for easy testing, maintenance, and upgrades.
-- **Configuration-Driven:** All settings (API keys, model names, file paths, chunking parameters) are managed in a central `config.py` file.
-- **Cost-Conscious & Efficient:**
-  - **Checksum Verification:** Detects file changes, preventing redundant processing.
-  - **Persistent Vector Store:** Embeddings are calculated once and saved to disk (using ChromaDB).
-- **Multi-Format Document Support:** Supports PDF (`.pdf`), Microsoft Word (`.docx`), and Plain Text (`.txt`) files.
-- **Command-Line Interface (CLI):** Separates indexing from querying, mirroring production workflows.
-- **Modern LangChain Implementation:** Uses LangChain Expression Language (LCEL) for building a transparent and powerful RAG chain.
-
----
-
-## 📂 Project Structure
-
-```mermaid
-graph TD
-    A[rag_project/] --> B[data/]
-    B --> C[raw/]
-    B --> D[processed/]
-    A --> E[src/]
-    E --> F[config.py]
-    E --> G[ingest.py]
-    E --> H[embed_store.py]
-    E --> I[llm.py]
-    A --> J[main.py]
-    A --> K[.env]
-    A --> L[requirements.txt]
-    A --> M[README.md]
+```
+rag_llm/
+├── chroma_store/          # Vector database storage
+├── data/                  # Document storage
+│   ├── raw/               # Original documents
+│   └── processed/         # Processed chunks and metadata
+├── frontend/              # React frontend
+│   ├── public/            # Static assets
+│   └── src/               # React source code
+├── src/                   # Python source code
+│   ├── prompts/           # Prompt templates
+│   ├── api.py             # FastAPI application
+│   ├── config.py          # Configuration settings
+│   ├── embed_store.py     # Vector store operations
+│   ├── ingest.py          # Document processing
+│   ├── llm.py             # LLM integration
+│   └── main.py            # CLI entry point
+├── tests/                 # Test files
+├── .env                   # Environment variables
+├── environment.yml        # Conda environment
+├── requirements.txt       # Python dependencies
+└── setup.sh               # Setup script
 ```
 
-- **data/**
-  - `raw/` — Place your source documents (`.pdf`, `.docx`, `.txt`) here
-  - `processed/` — Caches processed chunks and file checksums
-- **src/**
-  - `config.py` — Central configuration for the entire pipeline
-  - `ingest.py` — Handles document loading, chunking, and checksums
-  - `embed_store.py` — Manages the ChromaDB vector store
-  - `llm.py` — Initializes the LLM (e.g., Groq)
-- `main.py` — Main entry point with the CLI (index, query)
-- `.env` — Stores secret API keys (Git-ignored)
-- `requirements.txt` — Project dependencies
-- `README.md` — You are here!
+## 🚀 Quick Start
 
----
+### Prerequisites
+- Python 3.9+
+- Node.js 16+
+- Conda (recommended)
 
-## 🚀 Getting Started
+### Installation
 
-Follow these steps to set up and run the project locally.
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd rag_llm
+   ```
 
-### 1. Clone the Repository
+2. **Set up Python environment**
+   ```bash
+   # Using conda (recommended)
+   conda env create -f environment.yml
+   conda activate rag_llm
+   
+   # Or with virtualenv
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
 
+3. **Set up frontend**
+   ```bash
+   cd frontend
+   npm install
+   cd ..
+   ```
+
+4. **Configure environment variables**
+   Create a `.env` file in the root directory:
+   ```env
+   # API Keys
+   OPENAI_API_KEY=your_openai_key
+   GROQ_API_KEY=your_groq_key
+   
+   # Application Settings
+   DEBUG=True
+   CHROMA_DB_PATH=./chroma_store
+   ```
+
+## 🖥️ Usage
+
+### Backend (CLI)
+
+1. **Index documents**
+   ```bash
+   python -m src.main index --file data/raw/your_document.pdf
+   ```
+
+2. **Query the system**
+   ```bash
+   python -m src.main query "Your question here"
+   ```
+
+### Web Interface
+
+1. **Start the backend server**
+   ```bash
+   uvicorn src.api:app --reload
+   ```
+
+2. **Start the frontend**
+   ```bash
+   cd frontend
+   npm start
+   ```
+
+3. Open `http://localhost:3000` in your browser
+
+## 📚 API Documentation
+
+Once the server is running, access the interactive API documentation at:
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+
+## 🧪 Testing
+
+Run the test suite with:
 ```bash
-git clone <your-repository-url>
-cd rag_project
+pytest tests/
 ```
-
-### 2. Set Up Environment Variables
-
-Create a file named `.env` in the project's root directory. This file stores your secret API keys.
-
-**.env file:**
-```env
-OPENAI_API_KEY="sk-..."
-GROQ_API_KEY="gsk_..."
-```
-> **Note:**  
-> - `OPENAI_API_KEY` is required for generating embeddings  
-> - `GROQ_API_KEY` is used for the LLM
-
-### 3. Install Dependencies
-
-Install all required Python packages using `requirements.txt`. It's recommended to use a virtual environment.
-
-```bash
-# Create and activate a virtual environment (optional)
-python -m venv venv
-source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### 4. Add Your Documents
-
-Place your source files in the `data/raw/` directory. Supported formats: `.pdf`, `.docx`, `.txt`.
-
-### 5. Index a Document
-
-Use the CLI to index a document:
-
-```bash
-python -m src.main index --file advanced-rag-interview-prep.pdf
-```
-
-This will ingest, chunk, and embed the document, storing results in the vector store.
-
-### 6. Query the System
-
-Ask questions using the CLI:
-
-```bash
-python -m src.main query "What is Retrieval-Augmented Generation?"
-```
-
-The system will retrieve relevant chunks and generate an answer using the LLM.
-
----
-
-## ⚙️ Usage
-
-Operate the application via the command-line interface in `main.py`.
-
-### Step 1: Index a Document
-
-Reads the file, splits it into chunks, generates embeddings, and saves them to the local vector store.
-
-```bash
-python main.py index --file "my_document.pdf"
-```
-> Run once for each new or updated file. The system skips indexing if the file hasn't changed.
-
-### Step 2: Query Your Documents
-
-Once your documents are indexed, you can ask questions using the `query` command. Retrieve relevant information and generate concise answers.
-
-```bash
-python main.py query "What was the main conclusion of the report?"
-```
-
-**Another example:**
-```bash
-python main.py query "Summarize the key points from the final chapter."
-```
-
----
-
-## 🛠️ Troubleshooting
-
-- Ensure your `.env` file contains valid API keys.
-- If you change a document, re-run the `index` command to update the vector store.
-- If you see errors about missing vector store, run `index` first.
-- For GPU acceleration, ensure PyTorch is installed with CUDA support.
-
----
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please:
-- Fork the repository
-- Create a feature branch
-- Submit a pull request with a clear description
-- Ensure your code is well-documented and tested
-
----
-
-## 📚 References
-
-- [LangChain](https://python.langchain.com/)
-- [ChromaDB](https://www.trychroma.com/)
-- [Groq](https://groq.com/)
-
----
+Contributions are welcome! Please follow these steps:
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
 ## 📄 License
 
-This project is licensed under the MIT License.
+Distributed under the MIT License. See `LICENSE` for more information.
+
+## 📧 Contact
+
+For questions or feedback, please open an issue on GitHub.
+
+## 📚 Resources
+
+- [LangChain Documentation](https://python.langchain.com/)
+- [ChromaDB Documentation](https://www.trychroma.com/)
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [React Documentation](https://reactjs.org/)
+
+```
+rag_llm/
+├── data/                    # Raw and processed documents
+│   ├── raw/                 # Original documents
+│   └── processed/           # Processed chunks and checksums
+├── frontend/                # React frontend
+├── src/                     # Backend source code
+│   ├── api.py               # FastAPI application
+│   ├── config.py            # Configuration settings
+│   ├── embed_store.py       # Vector store operations
+│   ├── ingest.py            # Document processing
+│   ├── llm.py               # LLM initialization
+│   └── prompts/             # Prompt templates
+└── tests/                   # Test files
+```
+
+## Setup
+
+### Backend Setup
+
+1. Create and activate a virtual environment:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: .\venv\Scripts\activate
+   ```
+
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. Set up environment variables:
+   Create a `.env` file in the project root with:
+   ```
+   GROQ_API_KEY=your_groq_api_key_here
+   ```
+
+### Frontend Setup
+
+1. Navigate to the frontend directory:
+   ```bash
+   cd frontend
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+## Running the Application
+
+### Start the Backend
+
+```bash
+uvicorn src.api:app --reload
+```
+
+The API will be available at `http://localhost:8000`
+
+### Start the Frontend
+
+In a new terminal:
+
+```bash
+cd frontend
+npm start
+```
+
+The frontend will be available at `http://localhost:3000`
+
+## API Endpoints
+
+- `GET /health` - Health check
+- `POST /ingest` - Upload and index a document
+- `POST /query` - Query the RAG system
+
+## Development
+
+### Testing
+
+Run tests with:
+
+```bash
+pytest
+```
+
+### Environment Variables
+
+- `GROQ_API_KEY`: Your Groq API key
+- `CHUNK_SIZE`: Document chunk size (default: 1000)
+- `CHUNK_OVERLAP`: Chunk overlap (default: 200)
+- `VECTOR_STORE_PATH`: Path to store vector database (default: "./chroma_store")
+
+## License
+
+MIT
