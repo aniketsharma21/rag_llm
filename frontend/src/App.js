@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { 
-  Box, 
-  Typography, 
+import {
+  Box,
+  Typography,
   IconButton,
   CircularProgress,
   TextField,
@@ -30,12 +30,15 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
+  DialogActions,
+  Fade,
+  Slide,
+  Zoom
 } from '@mui/material';
-import { 
-  Send as SendIcon, 
-  Upload as UploadIcon, 
-  Stop as StopIcon, 
+import {
+  Send as SendIcon,
+  Upload as UploadIcon,
+  Stop as StopIcon,
   DarkMode as DarkModeIcon,
   LightMode as LightModeIcon,
   AttachFile as AttachFileIcon,
@@ -51,6 +54,62 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 
 // Custom styled components
+const fadeInUp = keyframes`
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+`;
+
+const pulse = keyframes`
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+`;
+
+const typingDots = keyframes`
+  0%, 80%, 100% {
+    transform: scale(0);
+  }
+  40% {
+    transform: scale(1);
+  }
+`;
+
+const slideInRight = keyframes`
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+`;
+
+const slideInLeft = keyframes`
+  from {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+`;
 const MainContainer = styled(Box)({
   display: 'flex',
   flexDirection: 'column',
@@ -78,34 +137,102 @@ const ChatContainer = styled(Box)({
   },
 });
 
+const WelcomeScreen = styled(Box)({
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minHeight: '60vh',
+  textAlign: 'center',
+  padding: '2rem',
+  animation: `${fadeInUp} 0.6s ease-out`,
+});
+
+const WelcomeCard = styled(Paper)({
+  padding: '3rem',
+  borderRadius: '24px',
+  background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.1) 0%, rgba(124, 58, 237, 0.1) 100%)',
+  border: '1px solid rgba(37, 99, 235, 0.2)',
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.12)',
+  maxWidth: '600px',
+  width: '100%',
+  animation: `${fadeInUp} 0.8s ease-out 0.2s both`,
+});
+
+const AnimatedMessageItem = styled(ListItem)(({ sender }) => ({
+  animation: sender === 'user' ? `${slideInRight} 0.3s ease-out` : `${slideInLeft} 0.3s ease-out`,
+  '& .MuiListItemText-root': {
+    animation: `${fadeInUp} 0.4s ease-out 0.1s both`,
+  },
+  '& .message-bubble': {
+    animation: `${fadeInUp} 0.4s ease-out 0.2s both`,
+  },
+}));
+
 const MessageBubble = styled(Paper)(({ theme, sender }) => ({
   maxWidth: '80%',
-  padding: '12px 16px',
-  borderRadius: '18px',
-  marginBottom: '12px',
+  padding: '16px 20px',
+  borderRadius: sender === 'user' ? '20px 20px 6px 20px' : '20px 20px 20px 6px',
+  marginBottom: '16px',
   wordBreak: 'break-word',
   position: 'relative',
-  backgroundColor: sender === 'user' 
-    ? theme.palette.mode === 'dark' 
-      ? theme.palette.primary.dark 
-      : theme.palette.primary.light
+  backgroundColor: sender === 'user'
+    ? theme.palette.primary.main
     : theme.palette.mode === 'dark'
-      ? alpha(theme.palette.grey[800], 0.8)
-      : alpha(theme.palette.grey[100], 0.8),
-  color: sender === 'user' 
-    ? theme.palette.primary.contrastText 
+      ? theme.palette.grey[800]
+      : '#ffffff',
+  color: sender === 'user'
+    ? '#ffffff'
     : theme.palette.text.primary,
   alignSelf: sender === 'user' ? 'flex-end' : 'flex-start',
-  boxShadow: theme.shadows[1],
+  boxShadow: '0 2px 12px rgba(0, 0, 0, 0.08)',
+  border: sender === 'bot' ? `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[700] : theme.palette.grey[200]}` : 'none',
+  transition: 'all 0.2s ease-in-out',
+  '&:hover': {
+    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.12)',
+    transform: 'translateY(-1px)',
+  },
   '& pre': {
-    backgroundColor: theme.palette.mode === 'dark' ? '#2d2d2d' : '#f5f5f5',
-    padding: '12px',
+    backgroundColor: sender === 'user'
+      ? 'rgba(255, 255, 255, 0.1)'
+      : theme.palette.mode === 'dark'
+        ? theme.palette.grey[900]
+        : theme.palette.grey[100],
     borderRadius: '8px',
-    overflowX: 'auto',
+    padding: '12px',
+    margin: '8px 0',
+    overflow: 'auto',
+    fontSize: '0.875rem',
+    border: `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[700] : theme.palette.grey[300]}`,
   },
   '& code': {
-    fontFamily: 'Roboto Mono, monospace',
-    fontSize: '0.9em',
+    backgroundColor: sender === 'user'
+      ? 'rgba(255, 255, 255, 0.15)'
+      : theme.palette.mode === 'dark'
+        ? theme.palette.grey[700]
+        : theme.palette.grey[200],
+    padding: '2px 6px',
+    borderRadius: '4px',
+    fontSize: '0.85em',
+    fontFamily: 'Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+  },
+  '& p': {
+    margin: '8px 0',
+    lineHeight: 1.6,
+  },
+  '& ul, & ol': {
+    margin: '8px 0',
+    paddingLeft: '20px',
+  },
+  '& li': {
+    margin: '4px 0',
+  },
+  '& blockquote': {
+    borderLeft: `4px solid ${theme.palette.primary.main}`,
+    paddingLeft: '16px',
+    margin: '16px 0',
+    color: theme.palette.text.secondary,
+    fontStyle: 'italic',
   },
 }));
 
@@ -152,12 +279,6 @@ const SendButton = styled(IconButton)(({ theme }) => ({
   },
 }));
 
-const pulse = keyframes`
-  0% { opacity: 0.2; }
-  50% { opacity: 1; }
-  100% { opacity: 0.2; }
-`;
-
 const TypingIndicator = styled('div')({
   display: 'flex',
   gap: '4px',
@@ -184,12 +305,12 @@ const api = axios.create({
 // Create a WebSocket connection
 const createWebSocket = (url, onOpen, onMessage, onError, onClose) => {
   const ws = new WebSocket(url);
-  
+
   ws.onopen = () => {
     console.log('WebSocket connected');
     if (onOpen) onOpen();
   };
-  
+
   ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
@@ -198,17 +319,17 @@ const createWebSocket = (url, onOpen, onMessage, onError, onClose) => {
       console.error('Error parsing WebSocket message:', error);
     }
   };
-  
+
   ws.onerror = (error) => {
     console.error('WebSocket error:', error);
     if (onError) onError(error);
   };
-  
+
   ws.onclose = () => {
     console.log('WebSocket disconnected');
     if (onClose) onClose();
   };
-  
+
   return ws;
 };
 
@@ -216,30 +337,42 @@ const drawerWidth = 280;
 
 const themeColors = {
   light: {
-    background: '#f4f6fb',
-    chatBg: '#ffffff',
-    sidebarBg: '#1a237e',
-    sidebarText: '#fff',
-    userBubble: '#e3f2fd',
-    botBubble: '#f5f5f5',
-    border: '#e0e0e0',
+    primary: '#2563eb',
+    secondary: '#7c3aed',
+    background: '#ffffff',
+    chatBg: '#f8fafc',
+    sidebarBg: '#1f2937',
+    sidebarText: '#ffffff',
+    border: '#e5e7eb',
+    userBubble: '#2563eb',
+    botBubble: '#ffffff',
+    gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    surface: '#f1f5f9',
+    text: '#1e293b',
+    textSecondary: '#64748b'
   },
   dark: {
-    background: '#181a20',
-    chatBg: '#23272f',
-    sidebarBg: '#11143a',
-    sidebarText: '#fff',
-    userBubble: '#223a5f',
-    botBubble: '#23272f',
-    border: '#23272f',
+    primary: '#3b82f6',
+    secondary: '#8b5cf6',
+    background: '#0f172a',
+    chatBg: '#1e293b',
+    sidebarBg: '#1e293b',
+    sidebarText: '#f1f5f9',
+    border: '#334155',
+    userBubble: '#3b82f6',
+    botBubble: '#1e293b',
+    gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    surface: '#1e293b',
+    text: '#f1f5f9',
+    textSecondary: '#94a3b8'
   }
 };
 
 function App() {
   const [messages, setMessages] = useState([
-    { 
-      id: 1, 
-      text: 'Hello! Upload a document and ask me questions about it.', 
+    {
+      id: 1,
+      text: 'Hello! Upload a document and ask me questions about it.',
       sender: 'bot',
       type: 'text'
     }
@@ -281,7 +414,7 @@ function App() {
       } // onClose
     );
     setWebsocket(ws);
-    
+
     // Clean up WebSocket on component unmount
     return () => {
       if (ws) {
@@ -315,12 +448,12 @@ function App() {
         // Handle status updates (e.g., processing)
         console.log('Status:', data.status);
         break;
-        
+
       case 'chunk':
         // Stream response chunks
         setMessages(prev => {
           const lastMessage = prev[prev.length - 1];
-          
+
           if (lastMessage.sender === 'bot' && lastMessage.isStreaming) {
             // Update the last message with new chunk
             return [
@@ -346,7 +479,7 @@ function App() {
           }
         });
         break;
-        
+
       case 'complete':
         // Mark the streaming as complete
         setMessages(prev => {
@@ -365,7 +498,7 @@ function App() {
         });
         setIsLoading(false);
         break;
-        
+
       case 'error':
         // Handle errors
         setSnackbar({
@@ -375,7 +508,7 @@ function App() {
         });
         setIsLoading(false);
         break;
-        
+
       default:
         console.log('Unknown message type:', data.type);
     }
@@ -401,7 +534,7 @@ function App() {
       sender: 'user',
       type: 'text'
     };
-    
+
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
@@ -413,7 +546,7 @@ function App() {
         question: input,
         chat_history: chatHistoryRef.current
       }));
-      
+
     } catch (error) {
       console.error('Error sending message:', error);
       setSnackbar({
@@ -429,7 +562,7 @@ function App() {
     if (websocket) {
       websocket.send(JSON.stringify({ type: 'stop_generation' }));
       setIsLoading(false);
-      
+
       // Mark the last message as not streaming
       setMessages(prev => {
         const lastMessage = prev[prev.length - 1];
@@ -620,84 +753,355 @@ function App() {
       {/* Main content */}
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', bgcolor: colors.background }}>
         {/* Header */}
-        <AppBar position="static" elevation={0} sx={{ bgcolor: colors.chatBg, color: 'text.primary', borderBottom: `1px solid ${colors.border}` }}>
-          <Toolbar>
-            <IconButton color="inherit" edge="start" onClick={() => setMobileOpen(true)} sx={{ mr: 2, display: { sm: 'none' } }}>
+        <AppBar position="static" elevation={0} sx={{
+          bgcolor: colors.chatBg,
+          color: 'text.primary',
+          borderBottom: `1px solid ${colors.border}`,
+          backdropFilter: 'blur(10px)',
+          backgroundColor: theme.palette.mode === 'dark'
+            ? 'rgba(30, 41, 59, 0.8)'
+            : 'rgba(255, 255, 255, 0.8)',
+          boxShadow: '0 2px 20px rgba(0, 0, 0, 0.08)',
+        }}>
+          <Toolbar sx={{ minHeight: 64 }}>
+            <IconButton
+              color="inherit"
+              edge="start"
+              onClick={() => setMobileOpen(true)}
+              sx={{
+                mr: 2,
+                display: { sm: 'none' },
+                '&:hover': {
+                  backgroundColor: 'rgba(0, 0, 0, 0.04)',
+                }
+              }}
+            >
               <MenuIcon />
             </IconButton>
-            <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>RAG LLM Chat</Typography>
-            <Tooltip title="Settings"><IconButton color="inherit" onClick={() => setShowSettings(true)}><SettingsIcon /></IconButton></Tooltip>
-            <Tooltip title="Help"><IconButton color="inherit" onClick={() => setShowHelp(true)}><HelpOutlineIcon /></IconButton></Tooltip>
-            <Avatar sx={{ ml: 2, bgcolor: 'primary.main' }}>U</Avatar>
+
+            {/* Logo Section */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mr: 3 }}>
+              <Avatar sx={{
+                width: 40,
+                height: 40,
+                bgcolor: 'primary.main',
+                background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
+                fontSize: '1.2rem',
+                fontWeight: 'bold',
+                boxShadow: '0 2px 8px rgba(37, 99, 235, 0.3)',
+              }}>
+                R
+              </Avatar>
+              <Box sx={{ display: { xs: 'none', md: 'block' } }}>
+                <Typography variant="h6" sx={{
+                  fontWeight: 700,
+                  fontSize: '1.25rem',
+                  background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
+                  backgroundClip: 'text',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  lineHeight: 1.2
+                }}>
+                  RAG LLM
+                </Typography>
+                <Typography variant="caption" sx={{
+                  color: 'text.secondary',
+                  fontSize: '0.75rem',
+                  lineHeight: 1,
+                  opacity: 0.8
+                }}>
+                  Enterprise AI Assistant
+                </Typography>
+              </Box>
+            </Box>
+
+            {/* Status Indicator */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 'auto' }}>
+              <Box sx={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                bgcolor: isConnected ? 'success.main' : 'error.main',
+                boxShadow: `0 0 8px ${isConnected ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)'}`,
+                animation: isConnected ? `${pulse} 2s infinite` : 'none',
+              }} />
+              <Typography variant="body2" sx={{
+                color: 'text.secondary',
+                fontSize: '0.875rem',
+                display: { xs: 'none', sm: 'block' }
+              }}>
+                {isConnected ? 'Connected' : 'Disconnected'}
+              </Typography>
+            </Box>
+
+            {/* Action Buttons */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Tooltip title="Settings">
+                <IconButton
+                  color="inherit"
+                  onClick={() => setShowSettings(true)}
+                  sx={{
+                    '&:hover': {
+                      backgroundColor: 'rgba(0, 0, 0, 0.04)',
+                      transform: 'scale(1.05)',
+                    },
+                    transition: 'all 0.2s ease-in-out',
+                  }}
+                >
+                  <SettingsIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Help">
+                <IconButton
+                  color="inherit"
+                  onClick={() => setShowHelp(true)}
+                  sx={{
+                    '&:hover': {
+                      backgroundColor: 'rgba(0, 0, 0, 0.04)',
+                      transform: 'scale(1.05)',
+                    },
+                    transition: 'all 0.2s ease-in-out',
+                  }}
+                >
+                  <HelpOutlineIcon />
+                </IconButton>
+              </Tooltip>
+              <Avatar sx={{
+                ml: 1,
+                bgcolor: 'primary.main',
+                background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
+                width: 36,
+                height: 36,
+                fontSize: '0.9rem',
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(37, 99, 235, 0.3)',
+                '&:hover': {
+                  transform: 'scale(1.05)',
+                  boxShadow: '0 4px 12px rgba(37, 99, 235, 0.4)',
+                },
+                transition: 'all 0.2s ease-in-out',
+              }}>
+                U
+              </Avatar>
+            </Box>
           </Toolbar>
         </AppBar>
         {/* Chat area */}
-        <ChatContainer sx={{ flex: 1, minHeight: 0, maxHeight: '100%', p: { xs: 1, sm: 3 }, bgcolor: colors.background, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-          <Container maxWidth="md" sx={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', minHeight: 0, p: 0 }}>
-            <List sx={{ width: '100%', bgcolor: 'transparent', flex: 1, minHeight: 0, overflow: 'visible' }}>
-              {messages.map((message) => (
-                <ListItem key={message.id} alignItems="flex-start" sx={{
-                  flexDirection: message.sender === 'user' ? 'row-reverse' : 'row',
-                  textAlign: message.sender === 'user' ? 'right' : 'left',
-                  border: 'none',
-                  background: 'none',
-                  mb: 1
-                }}>
-                  <ListItemAvatar>
-                    <Avatar sx={{ bgcolor: message.sender === 'user' ? 'primary.main' : 'secondary.main', width: 40, height: 40 }}>
-                      {message.sender === 'user' ? 'U' : 'A'}
-                    </Avatar>
-                  </ListItemAvatar>
-                  <ListItemText
-                    primary={
-                      <Paper elevation={2} sx={{
-                        p: 2,
-                        borderRadius: message.sender === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                        backgroundColor: message.sender === 'user' ? colors.userBubble : colors.botBubble,
-                        color: 'text.primary',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-                        fontSize: '1.08rem',
-                        position: 'relative',
-                        minWidth: 80,
-                        maxWidth: { xs: '90vw', sm: '70%' },
-                        wordBreak: 'break-word',
-                        mb: 0.5
-                      }}>
-                        {renderMessageContent(message)}
-                        {message.isStreaming && (
-                          <Box component="span" sx={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: 'text.secondary', ml: 1, animation: 'pulse 1.5s infinite' }} />
-                        )}
-                        {message.sender === 'bot' && message.sources && message.sources.length > 0 && renderSources(message.sources)}
-                      </Paper>
-                    }
-                    secondary={
-                      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                        {new Date(message.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </Typography>
-                    }
+        <ChatContainer sx={{ flex: 1, minHeight: 0, maxHeight: '100%', p: { xs: 1, sm: 3 }, bgcolor: colors.background, display: 'flex', flexDirection: 'column', justifyContent: messages.length <= 1 ? 'center' : 'flex-end' }}>
+          <Container maxWidth="md" sx={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: messages.length <= 1 ? 'center' : 'flex-end', minHeight: 0, p: 0 }}>
+            {messages.length <= 1 ? (
+              <WelcomeScreen>
+                <WelcomeCard elevation={0}>
+                  <Avatar sx={{ width: 80, height: 80, bgcolor: 'primary.main', mb: 3, mx: 'auto' }}>
+                    <Typography variant="h2" sx={{ color: 'white', fontWeight: 'bold' }}>R</Typography>
+                  </Avatar>
+                  <Typography variant="h3" sx={{ mb: 2, fontWeight: 700, background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)', backgroundClip: 'text', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                    Welcome to RAG LLM Chat
+                  </Typography>
+                  <Typography variant="h6" sx={{ mb: 3, color: 'text.secondary', fontWeight: 400 }}>
+                    Your intelligent document assistant powered by advanced AI
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 3 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 2, bgcolor: 'rgba(37, 99, 235, 0.05)', borderRadius: 2 }}>
+                      <Avatar sx={{ bgcolor: 'primary.main', width: 40, height: 40 }}>📄</Avatar>
+                      <Box sx={{ textAlign: 'left' }}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>Upload Documents</Typography>
+                        <Typography variant="body2" sx={{ color: 'text.secondary' }}>Upload PDFs, DOCX, or TXT files to get started</Typography>
+                      </Box>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 2, bgcolor: 'rgba(124, 58, 237, 0.05)', borderRadius: 2 }}>
+                      <Avatar sx={{ bgcolor: 'secondary.main', width: 40, height: 40 }}>💬</Avatar>
+                      <Box sx={{ textAlign: 'left' }}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>Ask Questions</Typography>
+                        <Typography variant="body2" sx={{ color: 'text.secondary' }}>Get instant answers about your documents</Typography>
+                      </Box>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 2, bgcolor: 'rgba(34, 197, 94, 0.05)', borderRadius: 2 }}>
+                      <Avatar sx={{ bgcolor: 'success.main', width: 40, height: 40 }}>🚀</Avatar>
+                      <Box sx={{ textAlign: 'left' }}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>Powered by AI</Typography>
+                        <Typography variant="body2" sx={{ color: 'text.secondary' }}>Advanced RAG technology for accurate responses</Typography>
+                      </Box>
+                    </Box>
+                  </Box>
+                  <Button
+                    variant="contained"
+                    size="large"
+                    startIcon={<AttachFileIcon />}
+                    onClick={() => document.getElementById('upload-document')?.click()}
+                    sx={{
+                      py: 1.5,
+                      px: 4,
+                      borderRadius: '12px',
+                      fontSize: '1.1rem',
+                      fontWeight: 600,
+                      background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
+                      boxShadow: '0 4px 16px rgba(37, 99, 235, 0.3)',
+                      '&:hover': {
+                        background: 'linear-gradient(135deg, #1d4ed8 0%, #6d28d9 100%)',
+                        boxShadow: '0 6px 24px rgba(37, 99, 235, 0.4)',
+                        transform: 'translateY(-2px)',
+                      },
+                      transition: 'all 0.2s ease-in-out',
+                    }}
+                  >
+                    Upload Your First Document
+                  </Button>
+                  <input
+                    accept=".pdf,.docx,.txt"
+                    style={{ display: 'none' }}
+                    id="welcome-upload"
+                    type="file"
+                    onChange={handleFileUpload}
                   />
-                </ListItem>
-              ))}
-              <div ref={messagesEndRef} />
-            </List>
+                </WelcomeCard>
+              </WelcomeScreen>
+            ) : (
+              <List sx={{ width: '100%', bgcolor: 'transparent', flex: 1, minHeight: 0, overflow: 'visible' }}>
+                {messages.map((message, index) => (
+                  <AnimatedMessageItem key={message.id} sender={message.sender} alignItems="flex-start" sx={{
+                    flexDirection: message.sender === 'user' ? 'row-reverse' : 'row',
+                    textAlign: message.sender === 'user' ? 'right' : 'left',
+                    border: 'none',
+                    background: 'none',
+                    mb: 1,
+                    animationDelay: `${index * 0.1}s`
+                  }}>
+                    <ListItemAvatar>
+                      <Avatar sx={{ bgcolor: message.sender === 'user' ? 'primary.main' : 'secondary.main', width: 40, height: 40 }}>
+                        {message.sender === 'user' ? 'U' : 'A'}
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText
+                      primary={
+                        <MessageBubble
+                          className="message-bubble"
+                          sender={message.sender}
+                          elevation={0}
+                          sx={{
+                            p: 2,
+                            borderRadius: message.sender === 'user' ? '20px 20px 6px 20px' : '20px 20px 20px 6px',
+                            backgroundColor: message.sender === 'user'
+                              ? theme.palette.primary.main
+                              : theme.palette.mode === 'dark'
+                                ? theme.palette.grey[800]
+                                : '#ffffff',
+                            color: message.sender === 'user' ? '#ffffff' : theme.palette.text.primary,
+                            boxShadow: '0 2px 12px rgba(0, 0, 0, 0.08)',
+                            border: message.sender === 'bot' ? `1px solid ${theme.palette.mode === 'dark' ? theme.palette.grey[700] : theme.palette.grey[200]}` : 'none',
+                            fontSize: '1rem',
+                            position: 'relative',
+                            minWidth: 80,
+                            maxWidth: { xs: '90vw', sm: '70%' },
+                            wordBreak: 'break-word',
+                            mb: 0.5,
+                            transition: 'all 0.2s ease-in-out',
+                            '&:hover': {
+                              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.12)',
+                              transform: 'translateY(-1px)',
+                            },
+                          }}
+                        >
+                          {renderMessageContent(message)}
+                          {message.isStreaming && (
+                            <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, mt: 1 }}>
+                              <Box sx={{
+                                display: 'flex',
+                                gap: 0.5,
+                                '& > div': {
+                                  width: 4,
+                                  height: 4,
+                                  borderRadius: '50%',
+                                  backgroundColor: 'text.secondary',
+                                  animation: `${typingDots} 1.4s infinite ease-in-out`,
+                                },
+                                '& > div:nth-of-type(1)': { animationDelay: '-0.32s' },
+                                '& > div:nth-of-type(2)': { animationDelay: '-0.16s' },
+                              }}>
+                                <div></div>
+                                <div></div>
+                                <div></div>
+                              </Box>
+                            </Box>
+                          )}
+                          {message.sender === 'bot' && message.sources && message.sources.length > 0 && renderSources(message.sources)}
+                        </MessageBubble>
+                      }
+                      secondary={
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block', animation: `${fadeInUp} 0.3s ease-out 0.3s both` }}>
+                          {new Date(message.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Typography>
+                      }
+                    />
+                  </AnimatedMessageItem>
+                ))}
+                <div ref={messagesEndRef} />
+              </List>
+            )}
           </Container>
         </ChatContainer>
         {/* Input bar */}
         <Box component="form" onSubmit={handleSendMessage} sx={{
-          p: { xs: 1, sm: 2 },
+          p: { xs: 2, sm: 3 },
           bgcolor: colors.chatBg,
           borderTop: `1px solid ${colors.border}`,
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-end',
           position: 'sticky',
           bottom: 0,
-          zIndex: 10
+          zIndex: 10,
+          backdropFilter: 'blur(10px)',
+          backgroundColor: theme.palette.mode === 'dark'
+            ? 'rgba(30, 41, 59, 0.9)'
+            : 'rgba(255, 255, 255, 0.9)',
         }}>
-          <Container maxWidth="md" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Container maxWidth="md" sx={{ display: 'flex', alignItems: 'flex-end', gap: 2, p: 0 }}>
+            {/* File Upload Button */}
+            <Tooltip title="Upload document">
+              <IconButton
+                component="label"
+                disabled={isLoading || !isConnected}
+                sx={{
+                  minWidth: 48,
+                  width: 48,
+                  height: 48,
+                  borderRadius: '12px',
+                  bgcolor: 'rgba(0, 0, 0, 0.04)',
+                  color: 'text.secondary',
+                  '&:hover': {
+                    bgcolor: 'rgba(0, 0, 0, 0.08)',
+                    transform: 'scale(1.05)',
+                  },
+                  '&:disabled': {
+                    opacity: 0.5,
+                  },
+                  transition: 'all 0.2s ease-in-out',
+                  flexShrink: 0,
+                }}
+              >
+                <AttachFileIcon />
+                <input
+                  accept=".pdf,.docx,.txt"
+                  style={{ display: 'none' }}
+                  id="upload-document"
+                  type="file"
+                  onChange={handleFileUpload}
+                  disabled={isLoading || !isConnected}
+                />
+              </IconButton>
+            </Tooltip>
+
+            {/* Text Input */}
             <TextField
               fullWidth
               variant="outlined"
-              placeholder={!isConnected ? "Connecting to server..." : "Type your question..."}
+              placeholder={
+                !isConnected
+                  ? "Connecting to server..."
+                  : isLoading
+                    ? "AI is thinking..."
+                    : "Ask me anything about your documents..."
+              }
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={isLoading || !isConnected}
@@ -708,52 +1112,103 @@ function App() {
                 }
               }}
               multiline
-              maxRows={4}
+              maxRows={5}
               sx={{
                 '& .MuiOutlinedInput-root': {
-                  borderRadius: '28px',
-                  backgroundColor: isDark ? 'rgba(40,40,50,0.7)' : 'rgba(240,240,255,0.7)',
+                  borderRadius: '24px',
+                  backgroundColor: theme.palette.mode === 'dark'
+                    ? 'rgba(51, 65, 85, 0.5)'
+                    : 'rgba(241, 245, 249, 0.8)',
+                  border: `1px solid ${theme.palette.mode === 'dark' ? 'rgba(148, 163, 184, 0.2)' : 'rgba(0, 0, 0, 0.08)'}`,
+                  transition: 'all 0.2s ease-in-out',
+                  '&:hover': {
+                    backgroundColor: theme.palette.mode === 'dark'
+                      ? 'rgba(51, 65, 85, 0.7)'
+                      : 'rgba(241, 245, 249, 0.9)',
+                    borderColor: theme.palette.primary.main,
+                  },
+                  '&.Mui-focused': {
+                    backgroundColor: theme.palette.mode === 'dark'
+                      ? 'rgba(51, 65, 85, 0.8)'
+                      : 'rgba(255, 255, 255, 0.95)',
+                    borderColor: theme.palette.primary.main,
+                    boxShadow: `0 0 0 3px ${theme.palette.primary.main}25`,
+                  },
+                  '& .MuiOutlinedInput-input': {
+                    padding: '16px 20px',
+                    fontSize: '1rem',
+                    lineHeight: 1.5,
+                    '&::placeholder': {
+                      color: 'text.secondary',
+                      opacity: 0.7,
+                    },
+                  },
+                  '& .MuiOutlinedInput-notchedOutline': {
+                    border: 'none',
+                  },
                 },
               }}
               InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <label htmlFor="upload-document">
-                      <IconButton component="span" disabled={isLoading || !isConnected}>
-                        <AttachFileIcon />
+                endAdornment: input.trim() && !isLoading ? (
+                  <InputAdornment position="end">
+                    <Tooltip title="Send message (Enter)">
+                      <IconButton
+                        type="submit"
+                        disabled={!input.trim() || isLoading || !isConnected}
+                        sx={{
+                          bgcolor: 'primary.main',
+                          color: 'white',
+                          width: 36,
+                          height: 36,
+                          '&:hover': {
+                            bgcolor: 'primary.dark',
+                            transform: 'scale(1.1)',
+                          },
+                          '&:disabled': {
+                            bgcolor: 'action.disabledBackground',
+                            color: 'action.disabled',
+                          },
+                          transition: 'all 0.2s ease-in-out',
+                        }}
+                      >
+                        <SendIcon sx={{ fontSize: 18 }} />
                       </IconButton>
-                    </label>
-                    <input
-                      accept=".pdf,.docx,.txt"
-                      style={{ display: 'none' }}
-                      id="upload-document"
-                      type="file"
-                      onChange={handleFileUpload}
-                      disabled={isLoading || !isConnected}
-                    />
+                    </Tooltip>
                   </InputAdornment>
-                )
+                ) : null,
               }}
             />
-            {isLoading ? (
-              <Button
-                variant="contained"
-                color="error"
-                onClick={handleStopGeneration}
-                sx={{ minWidth: 48, width: 48, height: 48, borderRadius: '50%' }}
-              >
-                <StopIcon />
-              </Button>
-            ) : (
-              <Button
-                type="submit"
-                variant="contained"
-                color="primary"
-                disabled={!input.trim() || isLoading || !isConnected}
-                sx={{ minWidth: 48, width: 48, height: 48, borderRadius: '50%' }}
-              >
-                <SendIcon />
-              </Button>
+
+            {/* Send Button (when no text) */}
+            {!input.trim() && (
+              <Tooltip title={isLoading ? "Stop generation" : "Send message"}>
+                <span>
+                  <IconButton
+                    type="submit"
+                    disabled={!input.trim() && !isLoading || !isConnected}
+                    sx={{
+                      minWidth: 48,
+                      width: 48,
+                      height: 48,
+                      borderRadius: '12px',
+                      bgcolor: isLoading ? 'error.main' : 'primary.main',
+                      color: 'white',
+                      '&:hover': {
+                        bgcolor: isLoading ? 'error.dark' : 'primary.dark',
+                        transform: 'scale(1.05)',
+                      },
+                      '&:disabled': {
+                        bgcolor: 'action.disabledBackground',
+                        color: 'action.disabled',
+                      },
+                      transition: 'all 0.2s ease-in-out',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {isLoading ? <StopIcon /> : <SendIcon />}
+                  </IconButton>
+                </span>
+              </Tooltip>
             )}
           </Container>
         </Box>
