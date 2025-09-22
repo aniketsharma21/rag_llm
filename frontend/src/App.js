@@ -1,15 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, CssBaseline } from '@mui/material';
+import { Box, CssBaseline, IconButton } from '@mui/material';
+import SettingsIcon from '@mui/icons-material/Settings';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import ChatInput from './components/ChatInput';
 import FileUpload from './components/FileUpload';
+import SettingsPanel from './components/SettingsPanel';
 
 function App() {
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState({ model: 'all-MiniLM-L6-v2', numDocs: 3 });
   const ws = useRef(null);
 
   useEffect(() => {
@@ -20,7 +24,18 @@ function App() {
     ws.current.onclose = () => console.log('WebSocket disconnected');
 
     ws.current.onmessage = (event) => {
-      const receivedMessage = JSON.parse(event.data);
+            let receivedMessage;
+      try {
+        receivedMessage = JSON.parse(event.data);
+      } catch (error) {
+        console.error('Failed to parse WebSocket message:', error, event.data);
+        setMessages(prevMessages => [
+          ...prevMessages,
+          { text: 'Error: Received malformed data from server.', sender: 'bot' }
+        ]);
+        setIsLoading(false);
+        return;
+      }
 
       if (receivedMessage.type === 'chunk') {
         setMessages(prevMessages => {
@@ -99,9 +114,20 @@ function App() {
         onSelectConversation={handleSelectConversation}
       />
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', p: 1 }}>
+          <IconButton aria-label="Settings" onClick={() => setSettingsOpen(true)}>
+            <SettingsIcon />
+          </IconButton>
+        </Box>
         <FileUpload />
         <ChatWindow messages={messages} isLoading={isLoading} />
         <ChatInput onSendMessage={handleSendMessage} />
+        <SettingsPanel
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          settings={settings}
+          onChange={setSettings}
+        />
       </Box>
     </Box>
   );

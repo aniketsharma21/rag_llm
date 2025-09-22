@@ -1,7 +1,11 @@
-import React from 'react';
-import { Box, Button, List, ListItem, ListItemText, Typography, Divider } from '@mui/material';
+import React, { useState } from 'react';
+import { Box, Button, List, ListItem, ListItemText, Typography, Divider, TextField } from '@mui/material';
 
 function Sidebar({ conversations, onNewConversation, onSelectConversation }) {
+  const [search, setSearch] = useState('');
+  const filtered = conversations.filter(conv =>
+    conv.title.toLowerCase().includes(search.toLowerCase())
+  );
   return (
     <Box
       sx={{
@@ -20,10 +24,21 @@ function Sidebar({ conversations, onNewConversation, onSelectConversation }) {
           + New Chat
         </Button>
       </Box>
+      <Box sx={{ px: 2, pb: 1 }}>
+        <TextField
+          size="small"
+          fullWidth
+          placeholder="Search chats..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          variant="outlined"
+        />
+      </Box>
       <Divider />
       <List sx={{ flexGrow: 1, overflowY: 'auto' }}>
-        {conversations.map((conv) => (
-          <ListItem button key={conv.id} onClick={() => onSelectConversation(conv.id)}>
+        {filtered.length === 0 && <ListItem><ListItemText primary="No chats found." /></ListItem>}
+        {filtered.map((conv) => (
+          <ListItem component="button" key={conv.id} onClick={() => onSelectConversation(conv.id)}>
             <ListItemText primary={conv.title} />
           </ListItem>
         ))}

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Box, Button, Typography, LinearProgress, Snackbar, Alert } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { Box, Button, Typography, LinearProgress, Snackbar, Alert, List, ListItem, ListItemText, IconButton, Dialog, DialogTitle, DialogContent } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import PreviewIcon from '@mui/icons-material/Preview';
 import axios from 'axios';
 
 function FileUpload() {
@@ -8,6 +9,21 @@ function FileUpload() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' });
+  const [uploadHistory, setUploadHistory] = useState([]);
+  const [previewFile, setPreviewFile] = useState(null);
+
+  useEffect(() => {
+    // Fetch upload history from backend
+    async function fetchHistory() {
+      try {
+        const res = await axios.get('http://localhost:8000/files');
+        setUploadHistory(res.data.files || []);
+      } catch (e) {
+        // Ignore error for now
+      }
+    }
+    fetchHistory();
+  }, [notification]); // refresh on upload
 
   const handleFileChange = (event) => {
     setSelectedFile(event.target.files[0]);
@@ -78,6 +94,33 @@ function FileUpload() {
           {notification.message}
         </Alert>
       </Snackbar>
+      {/* Upload history */}
+      <Box sx={{ mt: 2 }}>
+        <Typography variant="subtitle2">Uploaded Documents</Typography>
+        <List dense>
+          {uploadHistory.length === 0 && <ListItem><ListItemText primary="No files uploaded yet." /></ListItem>}
+          {uploadHistory.map((file, idx) => (
+            <ListItem key={idx} secondaryAction={
+              <IconButton edge="end" aria-label="preview" onClick={() => setPreviewFile(file)}>
+                <PreviewIcon />
+              </IconButton>
+            }>
+              <ListItemText primary={file.name} />
+            </ListItem>
+          ))}
+        </List>
+      </Box>
+      {/* Document preview dialog */}
+      <Dialog open={!!previewFile} onClose={() => setPreviewFile(null)} maxWidth="md" fullWidth>
+        <DialogTitle>Preview: {previewFile?.name}</DialogTitle>
+        <DialogContent>
+          {previewFile?.url && previewFile.name.endsWith('.pdf') ? (
+            <iframe src={previewFile.url} title="PDF Preview" width="100%" height="600px" />
+          ) : (
+            <Typography>No preview available.</Typography>
+          )}
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 }

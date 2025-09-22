@@ -16,6 +16,7 @@ import uvicorn
 from pydantic import BaseModel, Field
 from langchain.prompts import PromptTemplate
 from langchain.schema.output_parser import StrOutputParser
+from fastapi.responses import FileResponse
 
 from src.ingest import process_document
 from src.embed_store import build_vector_store, get_retriever, load_vector_store
@@ -397,6 +398,48 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.info(f"WebSocket connection closed for {getattr(websocket, 'client', 'unknown')}")
         except Exception as e:
             logger.error(f"Error closing WebSocket: {str(e)}")
+
+# File management endpoints
+@app.get("/files")
+def list_files():
+    """List uploaded/ingested files with metadata and preview URLs."""
+    data_dir = os.path.join(os.path.dirname(__file__), '..', 'data', 'raw')
+    files = []
+    for fname in os.listdir(data_dir):
+        fpath = os.path.join(data_dir, fname)
+        if os.path.isfile(fpath):
+            files.append({
+                'name': fname,
+                'url': f"/files/preview/{fname}"
+            })
+    return {"files": files}
+
+@app.get("/files/preview/{filename}")
+def preview_file(filename: str):
+    """Serve a file for preview (PDF, etc)."""
+    data_dir = os.path.join(os.path.dirname(__file__), '..', 'data', 'raw')
+    fpath = os.path.join(data_dir, filename)
+    if not os.path.isfile(fpath):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(fpath)
+
+# Chat history/session management (stub)
+@app.get("/chats")
+def list_chats():
+    """List chat sessions (stub)."""
+    return {"chats": []}
+
+@app.get("/chats/{chat_id}")
+def get_chat(chat_id: str):
+    """Get chat session by ID (stub)."""
+    return {"id": chat_id, "messages": []}
+
+# Feedback endpoint (stub)
+@app.post("/feedback")
+def submit_feedback(feedback: dict):
+    """Collect user feedback on answers (stub)."""
+    # Save feedback to disk or database (not implemented)
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
