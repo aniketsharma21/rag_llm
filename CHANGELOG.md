@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved error handling and logging
 - Environment configuration examples
 - Development and production deployment guides
+- Integrated `react-router-dom` for frontend routing (2025-09-22)
 
 ### Changed
 - Updated project structure for better organization
@@ -23,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved error messages and validation
 - Optimized build process
 - Updated dependencies to latest stable versions
+- Enhanced UI and UX in the React frontend: improved sidebar, navigation, and chat/document management (2025-09-22)
 
 ## [0.1.0] - 2025-09-15
 ### Added

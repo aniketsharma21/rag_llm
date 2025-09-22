@@ -21,6 +21,9 @@ A modern, responsive web interface for the RAG (Retrieval-Augmented Generation) 
   - Dark/light theme support
   - Keyboard shortcuts
   - Loading states and error handling
+  - Enhanced sidebar and navigation (2025-09-22)
+  - Improved chat and document management UX (2025-09-22)
+  - Routing with `react-router-dom` (2025-09-22)
 
 - **Developer Experience**
   - TypeScript support
@@ -49,15 +52,9 @@ A modern, responsive web interface for the RAG (Retrieval-Augmented Generation) 
    yarn install
    ```
 
-3. **Configure environment variables**
+3. **Install routing dependency**
    ```bash
-   cp .env.example .env
-   ```
-   Update `.env` with your configuration:
-   ```env
-   REACT_APP_API_URL=http://localhost:8000
-   REACT_APP_WS_URL=ws://localhost:8000/ws
-   NODE_ENV=development
+   npm install react-router-dom
    ```
 
 4. **Start the development server**
@@ -67,6 +64,11 @@ A modern, responsive web interface for the RAG (Retrieval-Augmented Generation) 
    yarn start
    ```
    The application will be available at [http://localhost:3000](http://localhost:3000)
+
+## 🆕 Recent Updates (2025-09-22)
+- Enhanced sidebar and navigation for better usability.
+- Improved chat and document management experience.
+- Added `react-router-dom` for client-side routing.
 
 ## 📦 Available Scripts
 

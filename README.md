@@ -2,6 +2,11 @@
 
 A robust, modular, and production-oriented framework for building Retrieval-Augmented Generation (RAG) applications. Features a FastAPI backend and React frontend, designed for enterprise use cases with configuration-driven design, cost-efficiency, and extensibility.
 
+## 🆕 Recent Updates (2025-09-22)
+
+- Enhanced UI and UX in the frontend: improved navigation, sidebar, and chat experience.
+- Integrated `react-router-dom` for client-side routing in the React frontend.
+
 ## 🌟 Features
 
 ### Backend
@@ -31,6 +36,8 @@ A robust, modular, and production-oriented framework for building Retrieval-Augm
   - Real-time chat interface
   - Document upload and management
   - Conversation history
+  - Enhanced navigation and sidebar (2025-09-22)
+  - Routing with `react-router-dom` (2025-09-22)
 
 ## 🏗️ Project Structure
 
@@ -217,6 +224,11 @@ rag_llm/
 2. Install dependencies:
    ```bash
    npm install
+   ```
+
+3. Ensure `react-router-dom` is installed:
+   ```bash
+   npm install react-router-dom
    ```
 
 ## Running the Application
