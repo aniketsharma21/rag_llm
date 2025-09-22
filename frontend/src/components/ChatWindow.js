@@ -1,5 +1,5 @@
-import React from 'react';
-import { Box, Button, Typography, Divider } from '@mui/material';
+import React, { useState } from 'react';
+import { Box, Button, Typography, Divider, Tooltip } from '@mui/material';
 import Message from './Message';
 import DownloadIcon from '@mui/icons-material/Download';
 
@@ -26,6 +26,9 @@ function exportChat(messages, format = 'csv') {
 }
 
 function ChatWindow({ messages, isLoading, sessions = [], currentSessionId, onFeedback }) {
+  const [visibleCount, setVisibleCount] = useState(20);
+  const handleLoadMore = () => setVisibleCount((c) => c + 20);
+
   // Group messages by session if sessions provided, else show all
   const grouped = sessions.length > 0
     ? sessions.map(session => ({
@@ -35,16 +38,21 @@ function ChatWindow({ messages, isLoading, sessions = [], currentSessionId, onFe
     : [{ id: 'default', title: 'Current Chat', messages }];
 
   return (
-    <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }}>
+    <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }} role="log" aria-label="Chat messages">
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-        <Button
-          variant="outlined"
-          startIcon={<DownloadIcon />}
-          onClick={() => exportChat(messages, 'csv')}
-          size="small"
-        >
-          Export Chat
-        </Button>
+        <Tooltip title="Export chat as CSV">
+          <span>
+            <Button
+              variant="outlined"
+              startIcon={<DownloadIcon />}
+              onClick={() => exportChat(messages, 'csv')}
+              size="small"
+              aria-label="Export chat"
+            >
+              Export Chat
+            </Button>
+          </span>
+        </Tooltip>
       </Box>
       {grouped.map((group, idx) => (
         <Box key={group.id} sx={{ mb: 4 }}>
@@ -53,8 +61,16 @@ function ChatWindow({ messages, isLoading, sessions = [], currentSessionId, onFe
               {group.title || `Session ${idx + 1}`}
             </Typography>
           )}
-          {group.messages.map((msg, index) => (
-            <Message key={index} text={msg.text} sender={msg.sender} sources={msg.sources} onFeedback={onFeedback && (() => onFeedback(msg, group.id))} />
+          {/* Pagination: show only the last visibleCount messages */}
+          {group.messages.length > visibleCount && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
+              <Button onClick={handleLoadMore} size="small" variant="text" aria-label="Load more messages">
+                Load More
+              </Button>
+            </Box>
+          )}
+          {group.messages.slice(-visibleCount).map((msg, i) => (
+            <Message key={i} {...msg} />
           ))}
           {idx < grouped.length - 1 && <Divider sx={{ my: 2 }} />}
         </Box>

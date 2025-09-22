@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, CssBaseline, IconButton } from '@mui/material';
+import { Box, CssBaseline, IconButton, Snackbar, Alert, CircularProgress, Tooltip } from '@mui/material';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
 import SettingsIcon from '@mui/icons-material/Settings';
+import { Routes, Route, useNavigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import ChatInput from './components/ChatInput';
@@ -13,8 +15,13 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settings, setSettings] = useState({ model: 'all-MiniLM-L6-v2', numDocs: 3 });
+  const [settings, setSettings] = useState(() => {
+    const darkMode = localStorage.getItem('darkMode');
+    return { model: 'all-MiniLM-L6-v2', numDocs: 3, darkMode: darkMode ? JSON.parse(darkMode) : false };
+  });
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
   const ws = useRef(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const ws_url = process.env.REACT_APP_WEBSOCKET_URL || 'ws://localhost:8000/ws/chat';
@@ -24,11 +31,11 @@ function App() {
     ws.current.onclose = () => console.log('WebSocket disconnected');
 
     ws.current.onmessage = (event) => {
-            let receivedMessage;
+      let receivedMessage;
       try {
         receivedMessage = JSON.parse(event.data);
       } catch (error) {
-        console.error('Failed to parse WebSocket message:', error, event.data);
+        setSnackbar({ open: true, message: 'Received malformed data from server.', severity: 'error' });
         setMessages(prevMessages => [
           ...prevMessages,
           { text: 'Error: Received malformed data from server.', sender: 'bot' }
@@ -56,9 +63,11 @@ function App() {
         });
       } else if (receivedMessage.type === 'complete') {
         setIsLoading(false);
+        setSnackbar({ open: true, message: 'Response complete.', severity: 'success' });
       } else if (receivedMessage.type === 'error') {
         setMessages(prevMessages => [...prevMessages, { text: `Error: ${receivedMessage.message}`, sender: 'bot' }]);
         setIsLoading(false);
+        setSnackbar({ open: true, message: receivedMessage.message, severity: 'error' });
       }
     };
 
@@ -77,7 +86,7 @@ function App() {
         // Send message in the format expected by the backend
         ws.current.send(JSON.stringify({ type: 'query', question: message }));
       } else {
-        console.error('WebSocket is not connected.');
+        setSnackbar({ open: true, message: 'Could not connect to the server.', severity: 'error' });
         setMessages(prevMessages => [...prevMessages, { text: 'Error: Could not connect to the server.', sender: 'bot' }]);
         setIsLoading(false);
       }
@@ -105,31 +114,67 @@ function App() {
     }
   };
 
+  const theme = createTheme({
+    palette: {
+      mode: settings.darkMode ? 'dark' : 'light',
+    },
+  });
+
   return (
-    <Box sx={{ display: 'flex', height: '100vh' }}>
+    <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Sidebar 
-        conversations={conversations}
-        onNewConversation={handleNewConversation}
-        onSelectConversation={handleSelectConversation}
-      />
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', p: 1 }}>
-          <IconButton aria-label="Settings" onClick={() => setSettingsOpen(true)}>
-            <SettingsIcon />
-          </IconButton>
-        </Box>
-        <FileUpload />
-        <ChatWindow messages={messages} isLoading={isLoading} />
-        <ChatInput onSendMessage={handleSendMessage} />
-        <SettingsPanel
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-          settings={settings}
-          onChange={setSettings}
+      <Box sx={{ display: 'flex', height: '100vh' }}>
+        <Sidebar
+          conversations={conversations}
+          onNewConversation={handleNewConversation}
+          onSelectConversation={handleSelectConversation}
         />
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', p: 1 }}>
+            <Tooltip title="Settings">
+              <IconButton aria-label="Settings" onClick={() => navigate('/settings')}>
+                <SettingsIcon />
+              </IconButton>
+            </Tooltip>
+          </Box>
+          <Routes>
+            <Route path="/" element={
+              <>
+                <FileUpload />
+                <Box sx={{ flex: 1, position: 'relative' }}>
+                  <ChatWindow messages={messages} isLoading={isLoading} />
+                  {isLoading && (
+                    <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 10 }}>
+                      <CircularProgress />
+                    </Box>
+                  )}
+                </Box>
+                <ChatInput onSendMessage={handleSendMessage} />
+              </>
+            } />
+            <Route path="/settings" element={
+              <SettingsPanel
+                open={true}
+                onClose={() => navigate(-1)}
+                settings={settings}
+                onChange={setSettings}
+              />
+            } />
+            <Route path="/upload" element={<FileUpload />} />
+          </Routes>
+          <Snackbar
+            open={snackbar.open}
+            autoHideDuration={4000}
+            onClose={() => setSnackbar({ ...snackbar, open: false })}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+          >
+            <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: '100%' }}>
+              {snackbar.message}
+            </Alert>
+          </Snackbar>
+        </Box>
       </Box>
-    </Box>
+    </ThemeProvider>
   );
 }
 

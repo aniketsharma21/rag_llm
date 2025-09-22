@@ -1,8 +1,17 @@
-import React, { useState } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, FormControl, InputLabel, Select, MenuItem, Slider, Box } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, FormControl, InputLabel, Select, MenuItem, Slider, Box, FormControlLabel, Switch } from '@mui/material';
 
 function SettingsPanel({ open, onClose, settings, onChange }) {
   const [localSettings, setLocalSettings] = useState(settings);
+  const [darkMode, setDarkMode] = useState(() => {
+    const stored = localStorage.getItem('darkMode');
+    return stored ? JSON.parse(stored) : false;
+  });
+
+  useEffect(() => {
+    setLocalSettings(settings);
+    if (typeof settings.darkMode !== 'undefined') setDarkMode(settings.darkMode);
+  }, [settings]);
 
   const handleSlider = (e, value) => {
     setLocalSettings({ ...localSettings, numDocs: value });
@@ -12,8 +21,13 @@ function SettingsPanel({ open, onClose, settings, onChange }) {
     setLocalSettings({ ...localSettings, model: e.target.value });
   };
 
+  const handleDarkMode = (e) => {
+    setDarkMode(e.target.checked);
+    localStorage.setItem('darkMode', JSON.stringify(e.target.checked));
+  };
+
   const handleSave = () => {
-    onChange(localSettings);
+    onChange({ ...localSettings, darkMode });
     onClose();
   };
 
@@ -46,6 +60,10 @@ function SettingsPanel({ open, onClose, settings, onChange }) {
               valueLabelDisplay="auto"
             />
           </Box>
+          <FormControlLabel
+            control={<Switch checked={darkMode} onChange={handleDarkMode} name="darkMode" color="primary" />}
+            label="Dark Mode"
+          />
         </Box>
       </DialogContent>
       <DialogActions>
@@ -57,4 +75,3 @@ function SettingsPanel({ open, onClose, settings, onChange }) {
 }
 
 export default SettingsPanel;
-

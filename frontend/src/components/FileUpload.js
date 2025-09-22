@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Button, Typography, LinearProgress, Snackbar, Alert, List, ListItem, ListItemText, IconButton, Dialog, DialogTitle, DialogContent } from '@mui/material';
+import { Box, Button, Typography, LinearProgress, Snackbar, Alert, List, ListItem, ListItemText, IconButton, Dialog, DialogTitle, DialogContent, Tooltip } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import PreviewIcon from '@mui/icons-material/Preview';
 import axios from 'axios';
@@ -12,11 +12,15 @@ function FileUpload() {
   const [uploadHistory, setUploadHistory] = useState([]);
   const [previewFile, setPreviewFile] = useState(null);
 
+  const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8000';
+  const MAX_SIZE_MB = 10;
+  const ALLOWED_TYPES = ['application/pdf'];
+
   useEffect(() => {
     // Fetch upload history from backend
     async function fetchHistory() {
       try {
-        const res = await axios.get('http://localhost:8000/files');
+        const res = await axios.get(`${API_BASE}/files`);
         setUploadHistory(res.data.files || []);
       } catch (e) {
         // Ignore error for now
@@ -26,7 +30,19 @@ function FileUpload() {
   }, [notification]); // refresh on upload
 
   const handleFileChange = (event) => {
-    setSelectedFile(event.target.files[0]);
+    const file = event.target.files[0];
+    if (!file) return;
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      setNotification({ open: true, message: 'Only PDF files are allowed.', severity: 'error' });
+      setSelectedFile(null);
+      return;
+    }
+    if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+      setNotification({ open: true, message: `File size must be under ${MAX_SIZE_MB}MB.`, severity: 'error' });
+      setSelectedFile(null);
+      return;
+    }
+    setSelectedFile(file);
   };
 
   const handleUpload = async () => {
@@ -39,7 +55,7 @@ function FileUpload() {
     setUploadProgress(0);
 
     try {
-      const response = await axios.post('http://localhost:8000/ingest', formData, {
+      const response = await axios.post(`${API_BASE}/ingest`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -50,7 +66,7 @@ function FileUpload() {
       });
       setNotification({ open: true, message: response.data.message, severity: 'success' });
     } catch (error) {
-      setNotification({ open: true, message: 'File upload failed!', severity: 'error' });
+      setNotification({ open: true, message: error?.response?.data?.message || 'File upload failed!', severity: 'error' });
     } finally {
       setUploading(false);
       setSelectedFile(null);
@@ -64,32 +80,40 @@ function FileUpload() {
   return (
     <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
       <Box sx={{ display: 'flex', alignItems: 'center' }}>
-        <Button
-          variant="contained"
-          component="label"
-          startIcon={<UploadFileIcon />}
-        >
-          Choose File
-          <input type="file" hidden onChange={handleFileChange} />
-        </Button>
+        <Tooltip title="Choose a PDF file to upload">
+          <Button
+            variant="contained"
+            component="label"
+            startIcon={<UploadFileIcon />}
+            aria-label="Choose file"
+          >
+            Choose File
+            <input type="file" hidden onChange={handleFileChange} accept="application/pdf" />
+          </Button>
+        </Tooltip>
         {selectedFile && (
           <Typography sx={{ ml: 2 }}>{selectedFile.name}</Typography>
         )}
-        <Button
-          variant="contained"
-          onClick={handleUpload}
-          disabled={!selectedFile || uploading}
-          sx={{ ml: 'auto' }}
-        >
-          Upload
-        </Button>
+        <Tooltip title={selectedFile ? "Upload selected file" : "Select a file first"}>
+          <span>
+            <Button
+              variant="contained"
+              onClick={handleUpload}
+              disabled={!selectedFile || uploading}
+              sx={{ ml: 'auto' }}
+              aria-label="Upload file"
+            >
+              Upload
+            </Button>
+          </span>
+        </Tooltip>
       </Box>
       {uploading && (
         <Box sx={{ width: '100%', mt: 2 }}>
           <LinearProgress variant="determinate" value={uploadProgress} />
         </Box>
       )}
-      <Snackbar open={notification.open} autoHideDuration={6000} onClose={handleCloseNotification}>
+      <Snackbar open={notification.open} autoHideDuration={6000} onClose={handleCloseNotification} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
         <Alert onClose={handleCloseNotification} severity={notification.severity} sx={{ width: '100%' }}>
           {notification.message}
         </Alert>
@@ -101,9 +125,13 @@ function FileUpload() {
           {uploadHistory.length === 0 && <ListItem><ListItemText primary="No files uploaded yet." /></ListItem>}
           {uploadHistory.map((file, idx) => (
             <ListItem key={idx} secondaryAction={
-              <IconButton edge="end" aria-label="preview" onClick={() => setPreviewFile(file)}>
-                <PreviewIcon />
-              </IconButton>
+              <Tooltip title="Preview document">
+                <span>
+                  <IconButton edge="end" aria-label="preview" onClick={() => setPreviewFile(file)}>
+                    <PreviewIcon />
+                  </IconButton>
+                </span>
+              </Tooltip>
             }>
               <ListItemText primary={file.name} />
             </ListItem>

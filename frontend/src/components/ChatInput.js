@@ -1,14 +1,20 @@
 import React, { useState } from 'react';
-import { Box, TextField, IconButton } from '@mui/material';
+import { Box, TextField, IconButton, Tooltip } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 
 function ChatInput({ onSendMessage }) {
   const [input, setInput] = useState('');
+  const [error, setError] = useState(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (!input.trim()) {
+      setError(true);
+      return;
+    }
     onSendMessage(input);
     setInput('');
+    setError(false);
   };
 
   return (
@@ -28,13 +34,23 @@ function ChatInput({ onSendMessage }) {
         variant="outlined"
         placeholder="Type a message..."
         value={input}
-        onChange={(e) => setInput(e.target.value)}
+        onChange={(e) => {
+          setInput(e.target.value);
+          if (error && e.target.value.trim()) setError(false);
+        }}
         multiline
         maxRows={4}
+        error={error}
+        helperText={error ? 'Message cannot be empty.' : ''}
+        inputProps={{ 'aria-label': 'Type a message' }}
       />
-      <IconButton type="submit" color="primary" sx={{ ml: 1 }}>
-        <SendIcon />
-      </IconButton>
+      <Tooltip title="Send message">
+        <span>
+          <IconButton type="submit" color="primary" sx={{ ml: 1 }} disabled={!input.trim()}>
+            <SendIcon />
+          </IconButton>
+        </span>
+      </Tooltip>
     </Box>
   );
 }
