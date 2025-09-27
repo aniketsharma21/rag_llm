@@ -1,180 +1,177 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, CssBaseline, IconButton, Snackbar, Alert, CircularProgress, Tooltip } from '@mui/material';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
-import SettingsIcon from '@mui/icons-material/Settings';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom';
+import './App.css';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import ChatInput from './components/ChatInput';
+import Header from './components/Header';
 import FileUpload from './components/FileUpload';
 import SettingsPanel from './components/SettingsPanel';
 
-function App() {
+const AppContent = () => {
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'light');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [settings, setSettings] = useState(() => {
-    const darkMode = localStorage.getItem('darkMode');
-    return { model: 'all-MiniLM-L6-v2', numDocs: 3, darkMode: darkMode ? JSON.parse(darkMode) : false };
+    const savedSettings = localStorage.getItem('settings');
+    const defaults = { model: 'all-MiniLM-L6-v2', numDocs: 3 };
+    return savedSettings ? { ...defaults, ...JSON.parse(savedSettings) } : defaults;
   });
-  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
   const ws = useRef(null);
   const navigate = useNavigate();
 
+  // WebSocket connection logic
   useEffect(() => {
     const ws_url = process.env.REACT_APP_WEBSOCKET_URL || 'ws://localhost:8000/ws/chat';
     ws.current = new WebSocket(ws_url);
-
     ws.current.onopen = () => console.log('WebSocket connected');
     ws.current.onclose = () => console.log('WebSocket disconnected');
 
     ws.current.onmessage = (event) => {
-      let receivedMessage;
-      try {
-        receivedMessage = JSON.parse(event.data);
-      } catch (error) {
-        setSnackbar({ open: true, message: 'Received malformed data from server.', severity: 'error' });
-        setMessages(prevMessages => [
-          ...prevMessages,
-          { text: 'Error: Received malformed data from server.', sender: 'bot' }
-        ]);
-        setIsLoading(false);
-        return;
-      }
-
+      const receivedMessage = JSON.parse(event.data);
       if (receivedMessage.type === 'chunk') {
-        setMessages(prevMessages => {
-          const lastMessage = prevMessages[prevMessages.length - 1];
-          if (lastMessage && lastMessage.sender === 'bot') {
-            // Append to the last bot message if it's a streaming chunk
-            return [
-              ...prevMessages.slice(0, -1),
-              { ...lastMessage, text: lastMessage.text + receivedMessage.content }
-            ];
-          } else {
-            // Add a new bot message
-            return [
-              ...prevMessages,
-              { text: receivedMessage.content, sender: 'bot' }
-            ];
+        setMessages(prev => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg && lastMsg.sender === 'bot') {
+            return [...prev.slice(0, -1), { ...lastMsg, text: lastMsg.text + receivedMessage.content }];
           }
+          return [...prev, { text: receivedMessage.content, sender: 'bot', sources: [] }];
         });
       } else if (receivedMessage.type === 'complete') {
+        if (receivedMessage.message) {
+          setMessages(prev => {
+            const lastMsg = prev[prev.length - 1];
+            if (lastMsg && lastMsg.sender === 'bot') {
+              return [...prev.slice(0, -1), { ...lastMsg, ...receivedMessage.message }];
+            }
+            // Handle non-streamed case where 'complete' is the first and only message
+            return [...prev, receivedMessage.message];
+          });
+        }
         setIsLoading(false);
-        setSnackbar({ open: true, message: 'Response complete.', severity: 'success' });
       } else if (receivedMessage.type === 'error') {
-        setMessages(prevMessages => [...prevMessages, { text: `Error: ${receivedMessage.message}`, sender: 'bot' }]);
+        setMessages(prev => [...prev, { text: `Error: ${receivedMessage.message}`, sender: 'bot' }]);
         setIsLoading(false);
-        setSnackbar({ open: true, message: receivedMessage.message, severity: 'error' });
       }
     };
-
-    return () => {
-      ws.current.close();
-    };
+    return () => ws.current.close();
   }, []);
+
+  // Theme & Settings management logic
+  useEffect(() => {
+    const root = window.document.documentElement;
+    root.classList.toggle('dark', theme === 'dark');
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem('settings', JSON.stringify(settings));
+  }, [settings]);
+
+  const handleThemeToggle = () => {
+    setTheme(prevTheme => prevTheme === 'dark' ? 'light' : 'dark');
+  };
+
+  const handleSettingsSave = (newSettings) => {
+    setSettings(newSettings);
+  };
 
   const handleSendMessage = (message) => {
     if (message.trim()) {
-      const userMessage = { text: message, sender: 'user' };
-      setMessages(prevMessages => [...prevMessages, userMessage]);
       setIsLoading(true);
-
-      if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-        // Send message in the format expected by the backend
-        ws.current.send(JSON.stringify({ type: 'query', question: message }));
+      setMessages(prev => [...prev, { text: message, sender: 'user' }]);
+      if (ws.current?.readyState === WebSocket.OPEN) {
+        ws.current.send(JSON.stringify({ type: 'query', question: message, settings: { model: settings.model, num_docs: settings.numDocs } }));
       } else {
-        setSnackbar({ open: true, message: 'Could not connect to the server.', severity: 'error' });
-        setMessages(prevMessages => [...prevMessages, { text: 'Error: Could not connect to the server.', sender: 'bot' }]);
+        setMessages(prev => [...prev, { text: 'Error: Could not connect to the server.', sender: 'bot' }]);
         setIsLoading(false);
       }
+    }
+  };
+
+  const handleFeedback = (messageId, feedback) => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: 'feedback', message_id: messageId, feedback }));
+    }
+  };
+
+  const saveCurrentConversation = () => {
+    // Only save if there are messages and it's not an already saved conversation
+    if (messages.length > 0 && currentConversationId === null) {
+      const newConversation = { id: Date.now(), title: messages[0].text.substring(0, 30), messages: [...messages] };
+      setConversations(prev => [newConversation, ...prev]);
+      // We don't set currentConversationId here, so the user can continue the chat and save it as another new one if they wish.
     }
   };
 
   const handleNewConversation = () => {
-    if (messages.length > 0) {
-      const newConversation = {
-        id: Date.now(),
-        title: messages[0].text.substring(0, 30),
-        messages: [...messages]
-      };
-      setConversations(prev => [newConversation, ...prev]);
-    }
+    saveCurrentConversation();
     setMessages([]);
     setCurrentConversationId(null);
+    navigate('/');
   };
 
   const handleSelectConversation = (id) => {
+    if (id === currentConversationId) return;
+    saveCurrentConversation();
     const conversation = conversations.find(c => c.id === id);
     if (conversation) {
       setCurrentConversationId(id);
       setMessages(conversation.messages);
+      navigate('/');
     }
   };
 
-  const theme = createTheme({
-    palette: {
-      mode: settings.darkMode ? 'dark' : 'light',
-    },
-  });
+  const handleClearChat = () => {
+    setMessages([]);
+  };
+
+  const filteredConversations = conversations.filter(conv =>
+    conv.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <Box sx={{ display: 'flex', height: '100vh' }}>
-        <Sidebar
-          conversations={conversations}
-          onNewConversation={handleNewConversation}
-          onSelectConversation={handleSelectConversation}
-        />
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', p: 1 }}>
-            <Tooltip title="Settings">
-              <IconButton aria-label="Settings" onClick={() => navigate('/settings')}>
-                <SettingsIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
-          <Routes>
-            <Route path="/" element={
-              <>
-                <FileUpload />
-                <Box sx={{ flex: 1, position: 'relative' }}>
-                  <ChatWindow messages={messages} isLoading={isLoading} />
-                  {isLoading && (
-                    <Box sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 10 }}>
-                      <CircularProgress />
-                    </Box>
-                  )}
-                </Box>
-                <ChatInput onSendMessage={handleSendMessage} />
-              </>
-            } />
-            <Route path="/settings" element={
-              <SettingsPanel
-                open={true}
-                onClose={() => navigate(-1)}
-                settings={settings}
-                onChange={setSettings}
-              />
-            } />
-            <Route path="/upload" element={<FileUpload />} />
-          </Routes>
-          <Snackbar
-            open={snackbar.open}
-            autoHideDuration={4000}
-            onClose={() => setSnackbar({ ...snackbar, open: false })}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-          >
-            <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: '100%' }}>
-              {snackbar.message}
-            </Alert>
-          </Snackbar>
-        </Box>
-      </Box>
-    </ThemeProvider>
+    <div className="bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark font-display flex h-screen">
+      <Sidebar
+        theme={theme}
+        onThemeToggle={handleThemeToggle}
+        conversations={filteredConversations}
+        onNewConversation={handleNewConversation}
+        onSelectConversation={handleSelectConversation}
+        currentConversationId={currentConversationId}
+        onSettingsClick={() => setIsSettingsOpen(true)}
+      />
+      <div className="flex-1 flex flex-col max-w-full overflow-hidden">
+        <Header onClearChat={handleClearChat} searchQuery={searchQuery} onSearchChange={setSearchQuery} />
+        <Routes>
+          <Route path="/" element={
+            <div className="flex-1 flex flex-col overflow-y-hidden">
+              <ChatWindow messages={messages} isLoading={isLoading} onFeedback={handleFeedback} />
+              <ChatInput onSendMessage={handleSendMessage} />
+            </div>
+          }/>
+          <Route path="/upload" element={<FileUpload />} />
+        </Routes>
+      </div>
+      <SettingsPanel
+        open={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        settings={settings}
+        onSave={handleSettingsSave}
+      />
+    </div>
+  );
+};
+
+function App() {
+  return (
+    <Router>
+      <AppContent />
+    </Router>
   );
 }
 
