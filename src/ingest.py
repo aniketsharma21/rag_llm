@@ -1,8 +1,19 @@
 """
 ingest.py
 
-Handles document ingestion, chunking, and checksum management for the RAG pipeline.
-Supports PDF, Word, and text files. Ensures only changed documents are reprocessed.
+Enhanced document ingestion, chunking, and checksum management for the RAG pipeline.
+Supports multiple file formats: PDF, Word, Text, Markdown, CSV, JSON, PowerPoint, and Excel.
+Ensures only changed documents are reprocessed using checksum verification.
+
+Supported File Types:
+- PDF (.pdf) - Using PyPDFLoader
+- Word Documents (.docx) - Using UnstructuredWordDocumentLoader  
+- Text files (.txt) - Using TextLoader
+- Markdown (.md) - Using TextLoader with UTF-8 encoding
+- CSV files (.csv) - Using CSVLoader with UTF-8 encoding
+- JSON files (.json) - Using JSONLoader
+- PowerPoint (.pptx) - Using UnstructuredPowerPointLoader
+- Excel (.xlsx) - Custom loader converting to text format
 
 Usage:
     Use process_document(file_path) to ingest and chunk documents, with automatic checksum verification.
@@ -12,37 +23,147 @@ Usage:
 import os
 import pickle
 import hashlib
-from langchain_community.document_loaders import PyPDFLoader, UnstructuredWordDocumentLoader, TextLoader
+from langchain_community.document_loaders import (
+    PyPDFLoader, 
+    UnstructuredWordDocumentLoader, 
+    TextLoader,
+    CSVLoader,
+    JSONLoader,
+    UnstructuredPowerPointLoader
+)
+import pandas as pd
+import json
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from src.config import (
+    BASE_DIR,
     RAW_DATA_DIR,
     PROCESSED_DATA_DIR,
     CHECKSUM_DIR,
     CHUNK_SIZE,
-    CHUNK_OVERLAP,
-    logger
+    CHUNK_OVERLAP
 )
+from src.logging_config import get_logger
+from src.exceptions import DocumentProcessingError
+
+logger = get_logger(__name__)
 
 def _get_loader(file_path):
     """
-    Selects the appropriate document loader based on file extension.
+    Enhanced loader with support for multiple file types.
+    
+    Supported formats:
+    - PDF (.pdf)
+    - Word Documents (.docx)
+    - Text files (.txt)
+    - Markdown (.md)
+    - CSV files (.csv)
+    - JSON files (.json)
+    - PowerPoint (.pptx)
+    - Excel (.xlsx)
+    
     Args:
         file_path (str): Path to the document file.
     Returns:
         Document loader instance.
     Raises:
-        ValueError: If file type is unsupported.
+        DocumentProcessingError: If file type is unsupported.
     """
     _, ext = os.path.splitext(file_path)
     ext = ext.lower()
-    if ext == ".pdf":
-        return PyPDFLoader(file_path)
-    elif ext == ".docx":
-        return UnstructuredWordDocumentLoader(file_path)
-    elif ext == ".txt":
-        return TextLoader(file_path)
-    else:
-        raise ValueError(f"Unsupported file type: {ext}")
+    
+    supported_types = [".pdf", ".docx", ".txt", ".md", ".csv", ".json", ".pptx", ".xlsx"]
+    
+    try:
+        if ext == ".pdf":
+            return PyPDFLoader(file_path)
+        elif ext == ".docx":
+            return UnstructuredWordDocumentLoader(file_path)
+        elif ext in [".txt", ".md"]:
+            return TextLoader(file_path, encoding='utf-8')
+        elif ext == ".csv":
+            return CSVLoader(file_path, encoding='utf-8')
+        elif ext == ".json":
+            return JSONLoader(file_path, jq_schema='.', text_content=False)
+        elif ext == ".pptx":
+            return UnstructuredPowerPointLoader(file_path)
+        elif ext == ".xlsx":
+            return _create_excel_loader(file_path)
+        else:
+            raise DocumentProcessingError(
+                f"Unsupported file type: {ext}", 
+                {"file_type": ext, "supported_types": supported_types}
+            )
+    except Exception as e:
+        logger.error("Failed to create loader", file_path=file_path, error=str(e))
+        raise DocumentProcessingError(
+            f"Failed to create loader for {ext} file: {str(e)}",
+            {"file_path": file_path, "file_type": ext, "error": str(e)}
+        )
+
+def _create_excel_loader(file_path):
+    """
+    Create a custom loader for Excel files by converting to text format.
+    
+    Args:
+        file_path (str): Path to the Excel file
+        
+    Returns:
+        TextLoader: Loader for the converted text content
+    """
+    from langchain.schema import Document
+    
+    try:
+        # Read Excel file
+        df = pd.read_excel(file_path, sheet_name=None)  # Read all sheets
+        
+        # Convert to text format
+        text_content = []
+        for sheet_name, sheet_df in df.items():
+            text_content.append(f"Sheet: {sheet_name}\n")
+            text_content.append(sheet_df.to_string(index=False))
+            text_content.append("\n\n")
+        
+        # Create a temporary text file
+        import tempfile
+        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
+        temp_file.write("".join(text_content))
+        temp_file.close()
+        
+        # Return TextLoader for the temporary file
+        return TextLoader(temp_file.name, encoding='utf-8')
+        
+    except Exception as e:
+        logger.error("Failed to process Excel file", file_path=file_path, error=str(e))
+        raise DocumentProcessingError(
+            f"Failed to process Excel file: {str(e)}",
+            {"file_path": file_path, "error": str(e)}
+        )
+
+
+def _enrich_chunk_metadata(chunks, file_path):
+    """Ensure each chunk points back to the original raw document."""
+    absolute_path = os.path.abspath(file_path)
+    relative_path = os.path.relpath(absolute_path, BASE_DIR)
+    display_name = os.path.basename(file_path)
+
+    for idx, chunk in enumerate(chunks):
+        metadata = dict(getattr(chunk, "metadata", {}) or {})
+
+        metadata["source"] = absolute_path
+        metadata["raw_file_path"] = absolute_path
+        metadata["source_file"] = absolute_path
+        metadata["source_display_path"] = relative_path
+        metadata["source_display_name"] = display_name
+        metadata["chunk_index"] = idx
+
+        if "page" in metadata and isinstance(metadata["page"], int):
+            metadata["page_number"] = metadata["page"] + 1 if metadata["page"] >= 0 else metadata["page"]
+        elif "page_number" not in metadata:
+            metadata["page_number"] = None
+
+        chunk.metadata = metadata
+
+    return chunks
 
 def _calculate_checksum(file_path):
     """Calculates the SHA-256 checksum of a file."""
@@ -61,8 +182,8 @@ def process_document(file_path):
     Returns the chunks if the file was processed, otherwise None.
     """
     if not os.path.exists(file_path):
-        logger.error(f"File not found at {file_path}")
-        return None
+        logger.error("File not found", file_path=file_path)
+        raise DocumentProcessingError(f"File not found at {file_path}", {"file_path": file_path})
 
     # Create directories if they don't exist
     os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
@@ -87,7 +208,8 @@ def process_document(file_path):
         if os.path.exists(chunk_save_path):
             try:
                 with open(chunk_save_path, "rb") as f:
-                    return pickle.load(f)
+                    cached_chunks = pickle.load(f)
+                return _enrich_chunk_metadata(cached_chunks, file_path)
             except Exception as e:
                 logger.warning(f"Failed to load cached chunks: {e}. Re-processing.")
         else:
@@ -108,6 +230,9 @@ def process_document(file_path):
         chunk_overlap=CHUNK_OVERLAP
     )
     chunks = splitter.split_documents(docs)
+
+    # Ensure chunk metadata references the original raw document
+    chunks = _enrich_chunk_metadata(chunks, file_path)
 
     # Save chunks and new checksum
     try:

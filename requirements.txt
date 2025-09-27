@@ -40,9 +40,23 @@ black>=23.11.0
 isort>=5.12.0
 mypy>=1.7.0
 
+# Phase 1 Dependencies
+sqlalchemy>=2.0.23
+alembic>=1.13.1
+structlog>=23.2.0
+python-json-logger>=2.0.7
+pydantic>=2.4.2
+
 # CORS
 fastapi-cors>=0.0.6
 async-timeout==4.0.3
 backoff==2.2.1
 banks==2.2.0
 blessed==1.20.0
+
+# Phase 3 Dependencies - RAG Improvements
+rank-bm25>=0.2.2
+unstructured[all-docs]>=0.10.30
+python-pptx>=1.0.2
+openpyxl>=3.1.5
+pandas>=2.0.0

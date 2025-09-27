@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom';
 import './App.css';
-import Sidebar from './components/Sidebar';
+import EnhancedSidebar from './components/EnhancedSidebar';
 import ChatWindow from './components/ChatWindow';
-import ChatInput from './components/ChatInput';
-import Header from './components/Header';
-import FileUpload from './components/FileUpload';
+import EnhancedChatInput from './components/EnhancedChatInput';
+import EnhancedHeader from './components/EnhancedHeader';
+import EnhancedFileUpload from './components/EnhancedFileUpload';
 import SettingsPanel from './components/SettingsPanel';
 
 /**
@@ -18,65 +18,81 @@ const AppContent = () => {
   const [currentConversationId, setCurrentConversationId] = useState(null); // ID of the conversation currently being viewed
   const [messages, setMessages] = useState([]); // Messages for the currently active chat
   const [isLoading, setIsLoading] = useState(false); // Tracks if the bot is currently generating a response
-  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'light'); // UI theme: 'light' or 'dark'
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false); // Controls the visibility of the settings modal
-  const [searchQuery, setSearchQuery] = useState(''); // Input for searching conversation history
-  const [settings, setSettings] = useState(() => { // User-configurable settings
-    const savedSettings = localStorage.getItem('settings');
-    const defaults = { model: 'all-MiniLM-L6-v2', numDocs: 3 };
-    return savedSettings ? { ...defaults, ...JSON.parse(savedSettings) } : defaults;
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light'); // Theme state
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false); // Controls the settings panel visibility
+  const [searchQuery, setSearchQuery] = useState(''); // Search query for filtering conversations
+  const [settings, setSettings] = useState(() => {
+    const saved = localStorage.getItem('settings');
+    return saved ? JSON.parse(saved) : { model: 'llama-3.1-70b-versatile', numDocs: 5 };
   });
-  const ws = useRef(null); // Ref to hold the WebSocket instance
-  const navigate = useNavigate(); // Hook for programmatic navigation
 
-  /**
-   * Initializes and manages the WebSocket connection to the backend.
-   * Handles incoming messages for streaming responses, completion, and errors.
-   */
+  const ws = useRef(null); // WebSocket connection reference
+  const navigate = useNavigate(); // Navigation hook for routing
+
+  // --- WebSocket Connection ---
+
   useEffect(() => {
-    const ws_url = process.env.REACT_APP_WEBSOCKET_URL || 'ws://localhost:8000/ws/chat';
-    ws.current = new WebSocket(ws_url);
+    ws.current = new WebSocket('ws://localhost:8000/ws/chat');
     ws.current.onopen = () => console.log('WebSocket connected');
     ws.current.onclose = () => console.log('WebSocket disconnected');
 
     ws.current.onmessage = (event) => {
       const receivedMessage = JSON.parse(event.data);
       if (receivedMessage.type === 'chunk') {
-        // Append content to the last bot message for a streaming effect
         setMessages(prev => {
           const lastMsg = prev[prev.length - 1];
           if (lastMsg && lastMsg.sender === 'bot') {
-            return [...prev.slice(0, -1), { ...lastMsg, text: lastMsg.text + receivedMessage.content }];
+            return [...prev.slice(0, -1), { 
+              ...lastMsg, 
+              text: (lastMsg.text || '') + (receivedMessage.content || '')
+            }];
           }
-          return [...prev, { text: receivedMessage.content, sender: 'bot', sources: [] }];
+          return [...prev, { 
+            text: receivedMessage.content || '', 
+            sender: 'bot', 
+            sources: [],
+            id: Date.now() 
+          }];
         });
       } else if (receivedMessage.type === 'complete') {
-        // Finalize the bot's message with ID and sources
-        if (receivedMessage.message) {
-          setMessages(prev => {
-            const lastMsg = prev[prev.length - 1];
-            if (lastMsg && lastMsg.sender === 'bot') {
-              return [...prev.slice(0, -1), { ...lastMsg, ...receivedMessage.message }];
-            }
-            return [...prev, receivedMessage.message]; // Handle non-streamed responses
-          });
-        }
+        // Finalize the bot's message with sources - FIXED SOURCES HANDLING
+        setMessages(prev => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg && lastMsg.sender === 'bot') {
+            return [...prev.slice(0, -1), { 
+              ...lastMsg, 
+              sources: receivedMessage.sources || [],
+              id: Date.now()
+            }];
+          }
+          return [...prev, {
+            text: receivedMessage.content || '',
+            sender: 'bot',
+            sources: receivedMessage.sources || [],
+            id: Date.now()
+          }];
+        });
         setIsLoading(false);
       } else if (receivedMessage.type === 'error') {
-        setMessages(prev => [...prev, { text: `Error: ${receivedMessage.message}`, sender: 'bot' }]);
+        setMessages(prev => [...prev, { text: `An error occurred: ${receivedMessage.message}`, sender: 'bot' }]);
         setIsLoading(false);
       }
     };
-    // Cleanup WebSocket connection on component unmount
-    return () => ws.current.close();
+
+    return () => {
+      if (ws.current) {
+        ws.current.close();
+      }
+    };
   }, []);
 
+  // --- Theme and Settings Management ---
+
   /**
-   * Manages the application's theme by toggling the 'dark' class on the root element
-   * and persisting the theme choice in local storage.
+   * Applies the theme to the document root and persists it to local storage.
    */
   useEffect(() => {
-    const root = window.document.documentElement;
+    const root = document.documentElement;
     root.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('theme', theme);
   }, [theme]);
@@ -118,6 +134,56 @@ const AppContent = () => {
   const handleFeedback = (messageId, feedback) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({ type: 'feedback', message_id: messageId, feedback }));
+    }
+  };
+
+  /**
+   * Handles file upload from chat input - ADDED MISSING FUNCTION
+   * @param {Array} files - Array of files to upload
+   */
+  const handleFileUpload = async (files) => {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const successes = [];
+    const failures = [];
+
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const response = await fetch('http://localhost:8000/ingest', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (response.ok) {
+          successes.push({ file, data });
+        } else {
+          const message = data?.message || data?.detail || 'Upload failed';
+          failures.push({ file, message });
+        }
+      } catch (error) {
+        failures.push({ file, message: error.message });
+      }
+    }
+
+    if (successes.length > 0) {
+      setMessages(prev => [...prev, {
+        text: `Uploaded ${successes.length} file(s): ${successes.map(({ file }) => file.name).join(', ')}`,
+        sender: 'system'
+      }]);
+    }
+
+    if (failures.length > 0) {
+      setMessages(prev => [...prev, {
+        text: `Failed to upload ${failures.length} file(s): ${failures.map(({ file, message }) => `${file.name} (${message})`).join('; ')}`,
+        sender: 'system'
+      }]);
     }
   };
 
@@ -170,7 +236,7 @@ const AppContent = () => {
 
   return (
     <div className="bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark font-display flex h-screen">
-      <Sidebar
+      <EnhancedSidebar
         theme={theme}
         onThemeToggle={handleThemeToggle}
         conversations={filteredConversations}
@@ -178,17 +244,19 @@ const AppContent = () => {
         onSelectConversation={handleSelectConversation}
         currentConversationId={currentConversationId}
         onSettingsClick={() => setIsSettingsOpen(true)}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
       />
       <div className="flex-1 flex flex-col max-w-full overflow-hidden">
-        <Header onClearChat={handleClearChat} searchQuery={searchQuery} onSearchChange={setSearchQuery} />
+        <EnhancedHeader onClearChat={handleClearChat} />
         <Routes>
           <Route path="/" element={
             <div className="flex-1 flex flex-col overflow-y-hidden">
               <ChatWindow messages={messages} isLoading={isLoading} onFeedback={handleFeedback} />
-              <ChatInput onSendMessage={handleSendMessage} />
+              <EnhancedChatInput onSendMessage={handleSendMessage} onFileUpload={handleFileUpload} />
             </div>
           }/>
-          <Route path="/upload" element={<FileUpload />} />
+          <Route path="/upload" element={<EnhancedFileUpload />} />
         </Routes>
       </div>
       <SettingsPanel
@@ -202,15 +270,14 @@ const AppContent = () => {
 };
 
 /**
- * The root App component wraps the main application content in a Router
- * to enable client-side navigation.
+ * Main App component that wraps AppContent with Router for routing context.
  */
-function App() {
+const App = () => {
   return (
     <Router>
       <AppContent />
     </Router>
   );
-}
+};
 
 export default App;

@@ -9,19 +9,16 @@ Usage:
 
 import os
 import yaml
-import logging
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
+# Import enhanced logging after environment is loaded
+from src.logging_config import get_logger
+
 # --- Logging Setup ---
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger("rag_llm")
+logger = get_logger(__name__)
 
 # --- YAML Config Loading ---
 CONFIG_YAML_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml")
@@ -65,4 +62,4 @@ TOP_K = yaml_config.get("TOP_K", 5)
 # --- Models ---
 # Names of the models to be used for LLM and embeddings
 LLM_MODEL = yaml_config.get("LLM_MODEL", "llama-3.1-8b-instant")  # Example: Using a Groq model
-EMBEDDING_MODEL = yaml_config.get("EMBEDDING_MODEL", "text-embedding-3-small")
+EMBEDDING_MODEL = yaml_config.get("EMBEDDING_MODEL", "all-MiniLM-L6-v2")

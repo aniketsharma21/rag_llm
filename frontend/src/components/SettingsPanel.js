@@ -82,9 +82,7 @@ const SettingsPanel = ({ open, onClose, settings, onSave }) => {
               onChange={handleInputChange}
               className="w-full bg-surface-light dark:bg-surface-dark border border-gray-300 dark:border-gray-600 rounded-md p-2 focus:ring-primary focus:border-primary"
             >
-              <option value="all-MiniLM-L6-v2">MiniLM-L6-v2 (Local)</option>
-              <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-              <option value="gpt-4">GPT-4</option>
+              <option value="all-MiniLM-L6-v2">all-MiniLM-L6-v2</option>
             </select>
           </div>
 

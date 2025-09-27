@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import Message from './Message';
+import EnhancedMessage from './EnhancedMessage';
 
 /**
  * Displays the list of messages in the main chat area.
@@ -25,13 +25,14 @@ const ChatWindow = ({ messages, isLoading, onFeedback }) => {
   return (
     <main className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 relative" id="chat-window">
       {messages.map((msg, index) => (
-        <Message
+        <EnhancedMessage
           key={index}
           id={msg.id}
           sender={msg.sender}
           text={msg.text}
           sources={msg.sources}
           onFeedback={onFeedback}
+          timestamp={msg.timestamp || new Date().toISOString()}
         />
       ))}
       {/* Show typing indicator only when loading and the last message was from the user */}

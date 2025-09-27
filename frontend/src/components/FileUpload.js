@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
 /**
@@ -71,6 +71,7 @@ function FileUpload() {
   const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' }); // For showing success/error messages
   const [uploadHistory, setUploadHistory] = useState([]); // List of previously uploaded files
   const [previewFile, setPreviewFile] = useState(null); // The file to be shown in the preview modal
+  const [isDragOver, setIsDragOver] = useState(false); // Track drag over state for visual feedback
 
   // Constants
   const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8000';

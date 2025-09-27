@@ -1,7 +1,11 @@
 import asyncio
-import websockets
 import json
 
+import pytest
+import websockets
+
+
+@pytest.mark.asyncio
 async def test_websocket():
     try:
         # Connect to the WebSocket
