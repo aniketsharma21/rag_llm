@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-// A simple Modal component for previewing files
+/**
+ * A simple modal component for displaying a preview of a file.
+ * Currently supports PDF previews in an iframe.
+ * @param {object} props - The component props.
+ * @param {object} props.file - The file object to preview.
+ * @param {function} props.onClose - Callback function to close the modal.
+ */
 const PreviewModal = ({ file, onClose }) => {
   if (!file) return null;
 
@@ -26,7 +32,13 @@ const PreviewModal = ({ file, onClose }) => {
   );
 };
 
-// A simple Notification component
+/**
+ * A simple notification "toast" component for displaying success or error messages.
+ * @param {object} props - The component props.
+ * @param {string} props.message - The message to display.
+ * @param {string} props.severity - The type of notification ('success' or 'error').
+ * @param {function} props.onClose - Callback function to close the notification.
+ */
 const Notification = ({ message, severity, onClose }) => {
   if (!message) return null;
 
@@ -47,18 +59,28 @@ const Notification = ({ message, severity, onClose }) => {
   );
 };
 
+/**
+ * A component that provides a UI for uploading documents to the server.
+ * It includes file validation, upload progress, notifications, and a history of uploaded files.
+ */
 function FileUpload() {
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' });
-  const [uploadHistory, setUploadHistory] = useState([]);
-  const [previewFile, setPreviewFile] = useState(null);
+  // Component State
+  const [selectedFile, setSelectedFile] = useState(null); // The file currently selected by the user
+  const [uploading, setUploading] = useState(false); // Flag to indicate an active upload
+  const [uploadProgress, setUploadProgress] = useState(0); // Upload progress percentage
+  const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' }); // For showing success/error messages
+  const [uploadHistory, setUploadHistory] = useState([]); // List of previously uploaded files
+  const [previewFile, setPreviewFile] = useState(null); // The file to be shown in the preview modal
 
+  // Constants
   const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8000';
   const MAX_SIZE_MB = 10;
   const ALLOWED_TYPES = ['application/pdf'];
 
+  /**
+   * Fetches the history of uploaded files from the backend when the component mounts
+   * or when a new file is successfully uploaded.
+   */
   useEffect(() => {
     async function fetchHistory() {
       try {
@@ -69,8 +91,12 @@ function FileUpload() {
       }
     }
     fetchHistory();
-  }, [notification.open]);
+  }, [notification.open]); // Refreshes history after a notification (i.e., after an upload attempt)
 
+  /**
+   * Validates the selected file based on type and size.
+   * @param {React.ChangeEvent<HTMLInputElement>} event - The file input change event.
+   */
   const handleFileChange = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -87,6 +113,9 @@ function FileUpload() {
     setSelectedFile(file);
   };
 
+  /**
+   * Handles the file upload process, including progress tracking and notifications.
+   */
   const handleUpload = async () => {
     if (!selectedFile) return;
     const formData = new FormData();
@@ -112,6 +141,9 @@ function FileUpload() {
     }
   };
 
+  /**
+   * Effect to automatically hide notifications after a delay.
+   */
   useEffect(() => {
       if (notification.open) {
           const timer = setTimeout(() => setNotification({ open: false, message: '', severity: 'info' }), 5000);
@@ -122,6 +154,7 @@ function FileUpload() {
   return (
     <div className="p-4 md:p-6 h-full overflow-y-auto">
         <h2 className="text-2xl font-bold mb-4">Upload Documents</h2>
+        {/* Upload Section */}
         <div className="bg-surface-light dark:bg-surface-dark p-6 rounded-lg shadow-md">
             <div className="flex items-center space-x-4">
                 <label className="cursor-pointer bg-primary text-white px-4 py-2 rounded-md hover:bg-primary/90 flex items-center">
@@ -148,6 +181,7 @@ function FileUpload() {
             )}
         </div>
 
+        {/* Upload History Section */}
         <div className="mt-8">
             <h3 className="text-xl font-semibold mb-4">Uploaded Files</h3>
             <div className="bg-surface-light dark:bg-surface-dark p-4 rounded-lg shadow-md">

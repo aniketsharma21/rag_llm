@@ -1,15 +1,25 @@
 import React, { useEffect, useRef } from 'react';
 import Message from './Message';
 
+/**
+ * Displays the list of messages in the main chat area.
+ * It maps over the messages array and renders a `Message` component for each one.
+ * It also includes a "typing" indicator when the bot is generating a response.
+ *
+ * @param {object} props - The component props.
+ * @param {Array<object>} props.messages - The array of message objects to display.
+ * @param {boolean} props.isLoading - Flag indicating if the bot is typing.
+ * @param {function} props.onFeedback - Callback function to handle user feedback on messages.
+ */
 const ChatWindow = ({ messages, isLoading, onFeedback }) => {
   const messagesEndRef = useRef(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
+  /**
+   * Automatically scrolls the chat window to the bottom
+   * whenever a new message is added.
+   */
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   return (
@@ -24,6 +34,7 @@ const ChatWindow = ({ messages, isLoading, onFeedback }) => {
           onFeedback={onFeedback}
         />
       ))}
+      {/* Show typing indicator only when loading and the last message was from the user */}
       {isLoading && messages[messages.length-1]?.sender === 'user' && (
          <div className="flex justify-start">
             <div className="bg-surface-light dark:bg-surface-dark rounded-xl shadow-md p-4 max-w-2xl">
@@ -33,6 +44,7 @@ const ChatWindow = ({ messages, isLoading, onFeedback }) => {
             </div>
          </div>
       )}
+      {/* Empty div to act as a reference for scrolling to the bottom */}
       <div ref={messagesEndRef} />
     </main>
   );

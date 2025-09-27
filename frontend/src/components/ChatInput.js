@@ -1,17 +1,31 @@
 import React, { useState, useRef, useEffect } from 'react';
 
+/**
+ * Renders the message input form at the bottom of the screen.
+ * It includes a textarea that automatically resizes with content
+ * and a send button.
+ *
+ * @param {object} props - The component props.
+ * @param {function} props.onSendMessage - Callback function to send a message.
+ */
 const ChatInput = ({ onSendMessage }) => {
   const [input, setInput] = useState('');
   const textareaRef = useRef(null);
 
+  /**
+   * Effect to auto-resize the textarea height based on its content.
+   */
   useEffect(() => {
     const textarea = textareaRef.current;
     if (textarea) {
-      textarea.style.height = 'auto';
-      textarea.style.height = `${textarea.scrollHeight}px`;
+      textarea.style.height = 'auto'; // Reset height to shrink if text is deleted
+      textarea.style.height = `${textarea.scrollHeight}px`; // Set to content height
     }
   }, [input]);
 
+  /**
+   * Handles the click event for the send button.
+   */
   const handleSend = () => {
     if (input.trim()) {
       onSendMessage(input);
@@ -19,9 +33,14 @@ const ChatInput = ({ onSendMessage }) => {
     }
   };
 
+  /**
+   * Handles the 'Enter' key press to send the message,
+   * while allowing 'Shift+Enter' for new lines.
+   * @param {React.KeyboardEvent<HTMLTextAreaElement>} e - The keyboard event.
+   */
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
+      e.preventDefault(); // Prevent default 'Enter' behavior (new line)
       handleSend();
     }
   };
@@ -38,11 +57,12 @@ const ChatInput = ({ onSendMessage }) => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-          ></textarea>
+          />
           <button
             onClick={handleSend}
             className="bg-primary text-white p-2 rounded-full ml-2 hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 dark:focus:ring-offset-background-dark disabled:opacity-50"
             disabled={!input.trim()}
+            aria-label="Send message"
           >
             <span className="material-icons">send</span>
           </button>
