@@ -4,16 +4,20 @@ A modern, responsive web interface for the RAG (Retrieval-Augmented Generation) 
 
 ## ✨ Features
 
-- **Modern Chat Interface**: A clean, bubble-style UI for conversations.
-- **Real-time Message Streaming**: Bot responses are streamed in real-time.
-- **Markdown Rendering**: Messages are rendered with Markdown support.
-- **Source Attribution**: Bot messages can display the sources used for generation.
-- **Message Feedback**: Users can provide "helpful" or "not helpful" feedback on bot responses.
-- **Conversation History**: Past conversations are saved and can be revisited.
-- **Document Upload**: A dedicated page for uploading PDF documents to the knowledge base.
-- **Customizable Settings**: A modal to configure the AI model and other parameters.
-- **Responsive Design**: The UI is optimized for both desktop and mobile devices.
-- **Light/Dark Mode**: Toggle between light and dark themes, with the user's preference saved locally.
+- **Conversational Workspace**: Immersive chat layout with polished animations, responsive layouts, and accessibility-first patterns.
+- **Real-time Streaming**: WebSocket-driven assistant replies with incremental rendering and graceful loading states.
+- **Rich Message Experience**: Markdown rendering, inline code blocks, copy/share actions, and relative timestamps.
+- **Contextual Sources**: Numbered source cards with hover states, confidence indicators, and responsive presentation.
+- **Document Workbench**: Drag & drop uploads with validation, progress feedback, and toast-based alerts.
+- **Conversation Intelligence**: Searchable history in the sidebar, quick filters, and persistent sessions.
+- **Configurable Controls**: Settings panel for model selection and chat preferences, plus theme toggles with local persistence.
+
+## 🚀 Recent Enhancements
+
+- **Enhanced Components**: Rebuilt header, sidebar, chat input, message bubble, and file upload experiences (`frontend/src/components/Enhanced*.js`).
+- **Advanced Search UX**: Integrated global search bar within the sidebar with focus management and filter hooks.
+- **Mobile-first Polish**: Improved spacing, touch targets, and action visibility for small screens.
+- **Feedback & Notifications**: Expanded toast system, inline status indicators, and consistent loading skeletons.
 
 ## 🛠️ Prerequisites
 

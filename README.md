@@ -5,16 +5,25 @@ A robust, modular, and production-oriented framework for building Retrieval-Augm
 ## 🌟 Features
 
 ### Backend
--   **Document Processing**: Supports multiple formats (PDF, DOCX, TXT), performs smart chunking, and uses checksum verification to avoid redundant processing.
--   **Vector Storage**: Utilizes ChromaDB for persistent vector storage, enabling efficient similarity searches and automatic embedding generation.
--   **LLM Integration**: Powered by Groq for fast inference, with support for configurable models and different LLM providers.
--   **API Layer**: A robust RESTful API built with FastAPI, featuring WebSocket support for real-time communication and comprehensive, auto-generated documentation.
+-   **Document Processing**: Handles 8+ formats (PDF, DOCX, TXT, MD, CSV, JSON, PPTX, XLSX) with smart chunking, checksum validation, and graceful error handling via custom exceptions.
+-   **Vector & Hybrid Retrieval**: Builds persistent ChromaDB stores and combines semantic search with BM25 keyword ranking through an ensemble retriever with configurable weights.
+-   **LLM Orchestration**: Integrates Groq-hosted models alongside HuggingFace embeddings, advanced prompt templates, conversation memory, and confidence scoring.
+-   **API & Infrastructure**: FastAPI layer with REST and WebSocket streaming, structured logging (via `structlog`), database-backed conversation persistence, and resilient fallbacks.
 
 ### Frontend
--   **Modern React Interface**: A clean, responsive design built with React and styled with Tailwind CSS.
--   **Real-time Chat**: A fully interactive chat interface with real-time message streaming.
--   **Rich Functionality**: Features include document upload and management, conversation history, Markdown rendering, source attribution, and user feedback on messages.
--   **Customizable**: Supports light/dark themes and a settings panel for configuring the AI model.
+-   **Modern React Interface**: Responsive React + Tailwind UI with polished animations, mobile-first layouts, and accessibility-focused interactions.
+-   **Real-time Chat**: Interactive WebSocket streaming, enhanced message actions (copy, share, timestamps), and improved loading states.
+-   **Intuitive Workflows**: Drag & drop uploads, advanced document search in the sidebar, rich source attribution cards, and toast notifications for feedback.
+-   **Customizable**: Light/dark themes, configurable model settings, and modular components ready for enterprise branding.
+
+## ✨ Recent Enhancements
+
+-   **Hybrid Retrieval Engine** (`src/retrieval.py`): Semantic + BM25 ensemble retriever with conversation-aware context selection.
+-   **Advanced Prompting** (`src/prompt_templates.py`): Six specialized templates with automatic selection and context formatting utilities.
+-   **Structured Logging & Exceptions** (`src/logging_config.py`, `src/exceptions.py`): JSON logs, contextual metadata, and domain-specific exception hierarchy.
+-   **Persistence Layer** (`src/database.py`): SQLAlchemy models for conversation/document history with CRUD helpers.
+-   **UI Upgrades** (`frontend/src/components/`): Enhanced chat experience featuring drag & drop uploads, improved sources display, and responsive design.
+-   **API Improvements** (`src/api.py`): Robust validation, conversation management endpoints, and streaming fallbacks.
 
 ## 🏗️ Project Structure
 
@@ -24,14 +33,18 @@ rag_llm/
 ├── data/                  # Document storage (raw and processed)
 ├── frontend/              # React + Tailwind CSS frontend
 ├── src/                   # Python backend source code
-│   ├── api.py             # FastAPI application
-│   ├── config.py          # Configuration settings
+│   ├── api.py             # FastAPI application (REST + WebSocket)
+│   ├── config.py          # Configuration settings & environment loading
+│   ├── database.py        # Conversation/document persistence layer
 │   ├── embed_store.py     # Vector store operations
-│   ├── ingest.py          # Document processing
-│   ├── llm.py             # LLM integration
-│   └── main.py            # CLI entry point
+│   ├── exceptions.py      # Custom exception hierarchy
+│   ├── ingest.py          # Document processing & loaders
+│   ├── llm.py             # LLM orchestration and prompt routing
+│   ├── logging_config.py  # Structured logging setup
+│   ├── prompt_templates.py# Advanced prompt templates & manager
+│   ├── retrieval.py       # Hybrid retriever implementations
+│   └── main.py            # CLI entry point for indexing/querying
 ├── tests/                 # Test files
-├── .env                   # Environment variables
 ├── environment.yml        # Conda environment definition
 └── requirements.txt       # Python dependencies
 ```
