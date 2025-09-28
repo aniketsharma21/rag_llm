@@ -1,5 +1,28 @@
 # RAG LLM Application - Improvement Recommendations
 
+## 🗺️ Updated Multi-Phase Roadmap (Q4 2025)
+
+### Phase 1 – Real-Time Feedback & Streaming Reliability
+- **Processing status tracking:** Introduce asynchronous ingest jobs that return `job_id`s from `/ingest` and expose `/status/{job_id}` for polling while documents are chunked and embedded.
+- **Frontend feedback loop:** Surface upload progress, “Processing…” indicators, WebSocket connection state, toast errors, and auto-reconnect logic with exponential backoff.
+- **Stop-generation control:** Honor `stop_generation` messages in the websocket handler and add a stop button in the chat UI to cancel streaming responses gracefully.
+
+### Phase 2 – Rich Source Presentation
+- **Metadata enrichment:** Extend RAG responses with document snippets, page info, and preview URLs for downstream rendering.
+- **Interactive source cards:** Render expandable cards beneath assistant messages with snippet previews and quick navigation to `file://` or `/files/preview/{filename}`.
+
+### Phase 3 – Retrieval Performance Upgrades
+- **Async hybrid retrieval:** Parallelize vector and BM25 retrieval, enable dynamic weighting heuristics, and add a lightweight re-ranking pass before generation.
+- **Caching layer:** Add configurable caching for repeated queries and deduplicated embeddings (e.g., Redis-backed) with toggles in `src/config.py`.
+
+### Phase 4 – Conversation Intelligence & Governance
+- **Conversation summarization:** Maintain rolling summaries and key entities to keep prompts within context limits and power smarter retrieval filters.
+- **Authentication & tenancy:** Implement JWT-based auth and enforce user-scoped data access in conversation/document managers.
+
+### Phase 5 – Documentation, Testing & Operations
+- **Docs & runbooks:** Document the ingest job lifecycle, caching requirements, auth flow, and architecture diagrams in `docs/` and the `README`.
+- **Quality gates:** Expand automated tests (FastAPI `TestClient`, React RTL, cache/retriever unit tests) and wire lint/test checks into CI before release.
+
 ## 🚀 Priority 1: Critical Fixes & Enhancements
 
 ### Backend Improvements

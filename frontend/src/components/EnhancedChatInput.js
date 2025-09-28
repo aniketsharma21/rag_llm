@@ -7,7 +7,7 @@ import React, { useState, useRef, useEffect } from 'react';
  * - Removed black container overlay while typing
  * - Better responsive design
  */
-const EnhancedChatInput = ({ onSendMessage, onFileUpload }) => {
+const EnhancedChatInput = ({ onSendMessage, onFileUpload, activeJobs = {} }) => {
   const [input, setInput] = useState('');
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -117,11 +117,35 @@ const EnhancedChatInput = ({ onSendMessage, onFileUpload }) => {
           </button>
         </div>
         
-        {/* Helper text */}
-        <div className="mt-2 text-center">
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Press Enter to send, Shift+Enter for new line
-          </p>
+        <div className="mt-3 space-y-2">
+          <div className="text-center">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Press Enter to send, Shift+Enter for new line
+            </p>
+          </div>
+
+          {Object.keys(activeJobs).length > 0 && (
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-3">
+              <p className="text-xs font-semibold text-blue-700 dark:text-blue-300 mb-2">
+                Processing uploads…
+              </p>
+              <ul className="space-y-2">
+                {Object.values(activeJobs).map(job => (
+                  <li key={job.jobId} className="flex items-start justify-between text-xs text-blue-800 dark:text-blue-200">
+                    <div className="mr-3 min-w-0">
+                      <p className="font-medium truncate">{job.fileName}</p>
+                      <p className="text-blue-600/80 dark:text-blue-300/80 truncate">
+                        {job.message || 'Processing…'}
+                      </p>
+                    </div>
+                    <span className="uppercase tracking-wide text-[10px] font-semibold bg-blue-100 dark:bg-blue-800/60 text-blue-700 dark:text-blue-200 px-2 py-1 rounded-full">
+                      {job.status?.replace('_', ' ') || 'running'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </div>
     </footer>

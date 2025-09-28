@@ -12,10 +12,14 @@ import time
 from operator import itemgetter
 from typing import List, Optional, Dict, Any
 import pickle
+import uuid
+from datetime import datetime
+import contextlib
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, status, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.concurrency import run_in_threadpool
 import uvicorn
 from pydantic import BaseModel, Field, validator
 from langchain.prompts import PromptTemplate
@@ -31,6 +35,7 @@ from src.exceptions import (
     LLMError, ValidationError, ConversationError
 )
 from src.database import ConversationManager, DocumentManager
+from src.job_manager import job_manager, JobNotFoundError
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -303,6 +308,23 @@ class QueryResponse(BaseModel):
         description="Number of source documents retrieved"
     )
 
+
+class IngestResponse(BaseModel):
+    job_id: str
+    status: str
+    message: Optional[str] = None
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    file_name: str
+    status: str
+    message: Optional[str] = None
+    details: Dict[str, Any] = Field(default_factory=dict)
+    error: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
 class HealthResponse(BaseModel):
     status: str
     model: str
@@ -322,6 +344,7 @@ class ConversationListResponse(BaseModel):
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        self._active_tasks: Dict[WebSocket, asyncio.Task] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -329,6 +352,9 @@ class ConnectionManager:
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
+        task = self._active_tasks.pop(websocket, None)
+        if task and not task.done():
+            task.cancel()
 
     async def send_personal_message(self, message: str, websocket: WebSocket):
         await websocket.send_text(message)
@@ -340,6 +366,15 @@ class ConnectionManager:
             except Exception as e:
                 logger.error(f"Error broadcasting message: {e}")
                 self.disconnect(connection)
+
+    def set_task(self, websocket: WebSocket, task: asyncio.Task) -> None:
+        self._active_tasks[websocket] = task
+
+    def get_task(self, websocket: WebSocket) -> Optional[asyncio.Task]:
+        return self._active_tasks.get(websocket)
+
+    def clear_task(self, websocket: WebSocket) -> None:
+        self._active_tasks.pop(websocket, None)
 
 manager = ConnectionManager()
 
@@ -390,6 +425,85 @@ def reset_enhanced_rag_chain():
     global enhanced_rag_chain
     enhanced_rag_chain = None
 
+
+async def _run_ingest_job(job_id: str, file_path: str, original_filename: str) -> None:
+    """Execute ingest workflow in the background and update job status."""
+    try:
+        job_manager.update_job(
+            job_id,
+            status="processing",
+            message="Chunking document",
+            details={"file_path": file_path},
+        )
+
+        chunks = await run_in_threadpool(process_document, file_path)
+
+        if not chunks:
+            job_manager.update_job(
+                job_id,
+                status="skipped",
+                message="Document unchanged; using cached chunks",
+            )
+            logger.info(
+                "Ingest job skipped (no changes detected)",
+                job_id=job_id,
+                file_path=file_path,
+            )
+            return
+
+        job_manager.update_job(
+            job_id,
+            message="Creating embeddings",
+            details={"chunks_count": len(chunks)},
+        )
+
+        await run_in_threadpool(build_vector_store, chunks)
+
+        # Ensure downstream queries pick up the latest store
+        reset_enhanced_rag_chain()
+
+        job_manager.update_job(
+            job_id,
+            status="completed",
+            message="Document processed successfully",
+            details={"chunks_count": len(chunks)},
+        )
+
+        logger.info(
+            "Ingest job completed",
+            job_id=job_id,
+            file_path=file_path,
+            chunks=len(chunks),
+        )
+
+    except Exception as exc:
+        logger.error(
+            "Ingest job failed",
+            job_id=job_id,
+            file_path=file_path,
+            error=str(exc),
+            exc_info=True,
+        )
+
+        job_manager.update_job(
+            job_id,
+            status="failed",
+            message="Document processing failed",
+            error=str(exc),
+        )
+
+        # Clean up the stored file on failure to allow retry
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as cleanup_error:
+            logger.warning(
+                "Failed to cleanup file after ingest failure",
+                job_id=job_id,
+                file_path=file_path,
+                error=str(cleanup_error),
+            )
+
 # Health check endpoint
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
@@ -407,7 +521,7 @@ async def health_check():
         )
 
 # Document upload endpoint
-@app.post("/ingest")
+@app.post("/ingest", response_model=IngestResponse)
 async def ingest_document(file: UploadFile = File(...)):
     """
     Upload and index a document for the RAG pipeline.
@@ -417,15 +531,18 @@ async def ingest_document(file: UploadFile = File(...)):
     """
     try:
         from src.config import RAW_DATA_DIR
-        
+
+        job_id = str(uuid.uuid4())
+        job_manager.create_job(job_id, file.filename, message="Upload received")
+
         # Ensure raw data directory exists
         os.makedirs(RAW_DATA_DIR, exist_ok=True)
-        
+
         # Save the uploaded file to /data/raw with original filename
         file_extension = os.path.splitext(file.filename)[1]
         safe_filename = file.filename.replace(" ", "_").replace("..", "")
         permanent_file_path = os.path.join(RAW_DATA_DIR, safe_filename)
-        
+
         # Handle duplicate filenames by adding a counter
         counter = 1
         original_path = permanent_file_path
@@ -433,30 +550,27 @@ async def ingest_document(file: UploadFile = File(...)):
             name_without_ext = os.path.splitext(safe_filename)[0]
             permanent_file_path = os.path.join(RAW_DATA_DIR, f"{name_without_ext}_{counter}{file_extension}")
             counter += 1
-        
+
         # Write the uploaded file to permanent location
         with open(permanent_file_path, "wb") as f:
             f.write(await file.read())
-        
+
         logger.info(f"Saved uploaded file to: {permanent_file_path}")
-        
-        # Process the document from the permanent location
-        chunks = process_document(permanent_file_path)
-        if chunks:
-            build_vector_store(chunks)
-            # Reset enhanced RAG chain to include new documents
-            reset_enhanced_rag_chain()
-            return {
-                "status": "success", 
-                "message": f"Document '{file.filename}' uploaded and processed successfully",
-                "file_path": permanent_file_path
-            }
-        else:
-            return {
-                "status": "skipped", 
-                "message": "Document not processed (no changes detected)",
-                "file_path": permanent_file_path
-            }
+
+        job_manager.update_job(
+            job_id,
+            status="queued",
+            message="File stored; scheduling processing",
+            details={"file_path": permanent_file_path},
+        )
+
+        asyncio.create_task(_run_ingest_job(job_id, permanent_file_path, file.filename))
+
+        return IngestResponse(
+            job_id=job_id,
+            status="queued",
+            message=f"Document '{file.filename}' received. Processing has started.",
+        )
             
     except Exception as e:
         logger.error(f"Error processing document: {str(e)}")
@@ -472,6 +586,203 @@ async def ingest_document(file: UploadFile = File(...)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing document: {str(e)}"
         )
+
+
+@app.get("/status/{job_id}", response_model=JobStatusResponse)
+async def get_job_status(job_id: str):
+    """Return current status for a previously submitted ingest job."""
+    try:
+        record = job_manager.get_job(job_id)
+    except JobNotFoundError:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    data = record.to_dict()
+    return JobStatusResponse(
+        job_id=data["job_id"],
+        file_name=data["file_name"],
+        status=data["status"],
+        message=data.get("message"),
+        details=data.get("details", {}),
+        error=data.get("error"),
+        created_at=data["created_at"],
+        updated_at=data["updated_at"],
+    )
+
+
+async def _process_websocket_query(
+    websocket: WebSocket,
+    question: str,
+    chat_history: List[Dict[str, Any]],
+) -> None:
+    """Process a single WebSocket query message and stream the answer."""
+    await manager.send_personal_message(
+        json.dumps({"type": "status", "status": "processing"}),
+        websocket,
+    )
+
+    enhanced_chain = get_enhanced_rag_chain()
+
+    try:
+        if enhanced_chain:
+            result = enhanced_chain.query(
+                question=question,
+                template_type=None,
+                k=5,
+                include_sources=True,
+                conversation_context=bool(chat_history),
+            )
+
+            raw_sources = result.get("sources", [])
+            formatted_sources = [
+                _normalize_source_payload(source, idx + 1, result.get("confidence_score"))
+                for idx, source in enumerate(raw_sources)
+            ]
+
+            formatted_answer = _apply_superscript_citations(
+                result.get("answer", ""),
+                formatted_sources,
+            )
+
+            chunk_size = 10
+            for i in range(0, len(formatted_answer), chunk_size):
+                chunk = formatted_answer[i:i + chunk_size]
+                if not chunk:
+                    continue
+                await manager.send_personal_message(
+                    json.dumps({
+                        "type": "chunk",
+                        "content": chunk,
+                    }),
+                    websocket,
+                )
+                await asyncio.sleep(0.05)
+
+            await manager.send_personal_message(
+                json.dumps({
+                    "type": "complete",
+                    "content": formatted_answer,
+                    "sources": formatted_sources,
+                    "confidence_score": result.get("confidence_score"),
+                    "template_used": result.get("template_used"),
+                    "num_sources": result.get("num_sources"),
+                }),
+                websocket,
+            )
+            return
+
+        # Fallback path
+        llm = get_llm()
+        vectordb = load_vector_store()
+        if not vectordb:
+            await manager.send_personal_message(
+                json.dumps({
+                    "type": "error",
+                    "message": "Vector store not found. Please upload and ingest a document first.",
+                }),
+                websocket,
+            )
+            return
+
+        retriever = get_retriever(vectordb)
+        if not retriever:
+            await manager.send_personal_message(
+                json.dumps({
+                    "type": "error",
+                    "message": "Retriever could not be created.",
+                }),
+                websocket,
+            )
+            return
+
+        formatted_history = "\n".join([
+            f"{'User' if msg.get('role') == 'user' else 'Assistant'}: {msg.get('content', '')}"
+            for msg in chat_history
+            if isinstance(msg, dict)
+        ])
+
+        template = (
+            "You are a helpful AI assistant. Use the following pieces of context to answer the question at the end.\n"
+            "If you don't know the answer, just say that you don't know, don't try to make up an answer.\n\n"
+            "Context:\n{context}\n\nChat History:\n{chat_history}\n\nQuestion: {question}\nAnswer:"
+        )
+
+        prompt = PromptTemplate(
+            template=template,
+            input_variables=["context", "chat_history", "question"],
+        )
+
+        async def get_context(x):
+            docs = await retriever.ainvoke(x["question"])
+            context = "\n\n".join([
+                f"[Source: {getattr(d, 'metadata', {}).get('source', 'unknown')}] {d.page_content}"
+                for d in docs
+            ])
+            x["_retrieved_docs"] = docs
+            return context
+
+        rag_chain = (
+            {
+                "context": get_context,
+                "chat_history": lambda x: x["chat_history"],
+                "question": lambda x: x["question"],
+            }
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+
+        input_obj = {"question": question, "chat_history": formatted_history}
+        full_response = ""
+
+        async for chunk in rag_chain.astream(input_obj):
+            if chunk and isinstance(chunk, str):
+                full_response += chunk
+                await manager.send_personal_message(
+                    json.dumps({
+                        "type": "chunk",
+                        "content": chunk,
+                    }),
+                    websocket,
+                )
+
+        docs = input_obj.get("_retrieved_docs", [])
+        formatted_sources = [
+            _normalize_source_payload(
+                {
+                    "id": idx + 1,
+                    "content": getattr(doc, "page_content", ""),
+                    "metadata": getattr(doc, "metadata", {}),
+                },
+                idx + 1,
+            )
+            for idx, doc in enumerate(docs)
+        ]
+
+        formatted_response = _apply_superscript_citations(full_response, formatted_sources)
+
+        await manager.send_personal_message(
+            json.dumps({
+                "type": "complete",
+                "content": formatted_response,
+                "sources": formatted_sources,
+            }),
+            websocket,
+        )
+
+    except asyncio.CancelledError:
+        logger.info("Generation cancelled for WebSocket client", websocket_client=str(getattr(websocket, "client", "unknown")))
+        await manager.send_personal_message(
+            json.dumps({"type": "status", "status": "stopped"}),
+            websocket,
+        )
+        raise
+    except Exception as exc:
+        logger.error("Error processing WebSocket query", error=str(exc), exc_info=True)
+        await manager.send_personal_message(
+            json.dumps({"type": "error", "message": f"Error processing your request: {exc}"}),
+            websocket,
+        )
+
 
 # Query endpoint
 @app.post("/query", response_model=QueryResponse)
@@ -596,276 +907,108 @@ async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time chat with the RAG pipeline."""
     try:
         await manager.connect(websocket)
-        logger.info(f"New WebSocket connection from {websocket.client}")
-        
-        # Send initial connection confirmation
+        logger.info("New WebSocket connection", client=str(getattr(websocket, "client", "unknown")))
+
         await manager.send_personal_message(
             json.dumps({"type": "status", "status": "connected"}),
-            websocket
+            websocket,
         )
-        
+
         while True:
             try:
-                # Set a timeout for receiving messages
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=300)  # 5 minute timeout
-                
-                try:
-                    message = json.loads(data)
-                except json.JSONDecodeError:
-                    logger.warning(f"Received invalid JSON: {data}")
-                    await manager.send_personal_message(
-                        json.dumps({
-                            "type": "error",
-                            "message": "Invalid JSON format"
-                        }),
-                        websocket
-                    )
-                    continue
-                
-                if message.get("type") == "query":
-                    # Process the query
-                    question = message.get("question", "")
-                    if not question.strip():
-                        await manager.send_personal_message(
-                            json.dumps({
-                                "type": "error",
-                                "message": "Question cannot be empty"
-                            }),
-                            websocket
-                        )
-                        continue
-                        
-                    chat_history = message.get("chat_history", [])
-                    
-                    # Send acknowledgment
-                    await manager.send_personal_message(
-                        json.dumps({"type": "status", "status": "processing"}),
-                        websocket
-                    )
-                    
-                    try:
-                        # Try to use enhanced RAG chain first
-                        enhanced_chain = get_enhanced_rag_chain()
-                        
-                        if enhanced_chain:
-                            # Use enhanced RAG chain with streaming simulation
-                            result = enhanced_chain.query(
-                                question=question,
-                                template_type=None,  # Auto-select template
-                                k=5,
-                                include_sources=True,
-                                conversation_context=bool(chat_history)
-                            )
-
-                            raw_sources = result.get("sources", [])
-                            formatted_sources = [
-                                _normalize_source_payload(source, idx + 1, result.get("confidence_score"))
-                                for idx, source in enumerate(raw_sources)
-                            ]
-
-                            formatted_answer = _apply_superscript_citations(result.get("answer", ""), formatted_sources)
-
-                            # Simulate streaming by sending the formatted answer in chunks
-                            chunk_size = 10  # Send 10 characters at a time
-                            
-                            for i in range(0, len(formatted_answer), chunk_size):
-                                chunk = formatted_answer[i:i + chunk_size]
-                                try:
-                                    await manager.send_personal_message(
-                                        json.dumps({
-                                            "type": "chunk", 
-                                            "content": chunk
-                                        }),
-                                        websocket
-                                    )
-                                    # Small delay to simulate streaming
-                                    await asyncio.sleep(0.05)
-                                except Exception as send_error:
-                                    logger.error(f"Error sending chunk: {str(send_error)}")
-                                    raise
-                            
-                            # Send completion message with enhanced metadata
-                            await manager.send_personal_message(
-                                json.dumps({
-                                    "type": "complete", 
-                                    "content": formatted_answer,
-                                    "sources": formatted_sources,
-                                    "confidence_score": result.get("confidence_score"),
-                                    "template_used": result.get("template_used"),
-                                    "num_sources": result.get("num_sources")
-                                }),
-                                websocket
-                            )
-                            
-                        else:
-                            # Fallback to original implementation
-                            logger.warning("Enhanced RAG chain not available, using fallback for WebSocket")
-                            
-                            llm = get_llm()
-                            vectordb = load_vector_store()
-                            if not vectordb:
-                                await manager.send_personal_message(
-                                    json.dumps({
-                                        "type": "error",
-                                        "message": "Vector store not found. Please upload and ingest a document first."
-                                    }),
-                                    websocket
-                                )
-                                continue
-                            retriever = get_retriever(vectordb)
-                            if not retriever:
-                                await manager.send_personal_message(
-                                    json.dumps({
-                                        "type": "error",
-                                        "message": "Retriever could not be created."
-                                    }),
-                                    websocket
-                                )
-                                continue
-                            formatted_history = "\n".join([
-                                f"{'User' if msg.get('role') == 'user' else 'Assistant'}: {msg.get('content', '')}" 
-                                for msg in chat_history if isinstance(msg, dict)
-                            ])
-                            template = """You are a helpful AI assistant. Use the following pieces of context to answer the question at the end.\nIf you don't know the answer, just say that you don't know, don't try to make up an answer.\n\nContext:\n{context}\n\nChat History:\n{chat_history}\n\nQuestion: {question}\nAnswer:"""
-                            prompt = PromptTemplate(
-                                template=template,
-                                input_variables=["context", "chat_history", "question"]
-                            )
-                            async def get_context(x):
-                                docs = await retriever.ainvoke(x["question"])
-                                context = "\n\n".join([
-                                    f"[Source: {getattr(d, 'metadata', {}).get('source', 'unknown')}] {d.page_content}" for d in docs
-                                ])
-                                x["_retrieved_docs"] = docs
-                                return context
-                            rag_chain = (
-                                {
-                                    "context": get_context,
-                                    "chat_history": lambda x: x["chat_history"],
-                                    "question": lambda x: x["question"]
-                                }
-                                | prompt
-                                | llm
-                                | StrOutputParser()
-                            )
-                            # Stream the response and collect sources
-                            full_response = ""
-                            sources = []
-                            try:
-                                input_obj = {"question": question, "chat_history": formatted_history}
-                                async for chunk in rag_chain.astream(input_obj):
-                                    if chunk and isinstance(chunk, str):
-                                        full_response += chunk
-                                        try:
-                                            await manager.send_personal_message(
-                                                json.dumps({
-                                                    "type": "chunk", 
-                                                    "content": chunk
-                                                }),
-                                                websocket
-                                            )
-                                        except Exception as send_error:
-                                            logger.error(f"Error sending chunk: {str(send_error)}")
-                                            raise
-                                retrieved_docs = input_obj.get("_retrieved_docs", [])
-                                formatted_sources = [
-                                    _normalize_source_payload(
-                                        {
-                                            "id": idx + 1,
-                                            "content": getattr(doc, 'page_content', ''),
-                                            "metadata": getattr(doc, 'metadata', {})
-                                        },
-                                        idx + 1
-                                    )
-                                    for idx, doc in enumerate(retrieved_docs)
-                                ]
-
-                                formatted_full_response = _apply_superscript_citations(full_response, formatted_sources)
-
-                                # Send completion message with sources
-                                await manager.send_personal_message(
-                                    json.dumps({
-                                        "type": "complete", 
-                                        "content": formatted_full_response,
-                                        "sources": formatted_sources
-                                    }),
-                                    websocket
-                                )
-                            except asyncio.CancelledError:
-                                logger.info("Generation was cancelled by the client")
-                                await manager.send_personal_message(
-                                    json.dumps({
-                                        "type": "status",
-                                        "status": "cancelled"
-                                    }),
-                                    websocket
-                                )
-                                raise
-                    except Exception as e:
-                        logger.error(f"Error processing query: {str(e)}", exc_info=True)
-                        await manager.send_personal_message(
-                            json.dumps({
-                                "type": "error", 
-                                "message": f"Error processing your request: {str(e)}"
-                            }),
-                            websocket
-                        )
-                
-                elif message.get("type") == "ping":
-                    # Handle ping/pong for keep-alive
-                    await manager.send_personal_message(
-                        json.dumps({"type": "pong"}),
-                        websocket
-                    )
-                
-                elif message.get("type") == "stop_generation":
-                    # Handle stop generation request
-                    # TODO: Implement the logic to stop the generation process
-                    logger.info("Received stop generation request")
-                    await manager.send_personal_message(
-                        json.dumps({"type": "status", "status": "stopped"}),
-                        websocket
-                    )
-
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=300)
             except asyncio.TimeoutError:
-                # Handle client timeout (no data received for a while)
-                logger.warning(f"Connection timeout for {websocket.client}")
+                logger.warning("WebSocket receive timeout", client=str(getattr(websocket, "client", "unknown")))
                 await manager.send_personal_message(
-                    json.dumps({
-                        "type": "error",
-                        "message": "Connection timeout"
-                    }),
-                    websocket
+                    json.dumps({"type": "error", "message": "Connection timeout"}),
+                    websocket,
                 )
                 break
-                
             except WebSocketDisconnect:
-                logger.info(f"Client {websocket.client} disconnected")
+                logger.info("WebSocket client disconnected", client=str(getattr(websocket, "client", "unknown")))
                 break
-                
-            except Exception as e:
-                logger.error(f"Unexpected error in WebSocket: {str(e)}", exc_info=True)
-                try:
+
+            try:
+                message = json.loads(data)
+            except json.JSONDecodeError:
+                logger.warning("Invalid JSON received", payload=data)
+                await manager.send_personal_message(
+                    json.dumps({"type": "error", "message": "Invalid JSON format"}),
+                    websocket,
+                )
+                continue
+
+            msg_type = message.get("type")
+
+            if msg_type == "ping":
+                await manager.send_personal_message(json.dumps({"type": "pong"}), websocket)
+                continue
+
+            if msg_type == "query":
+                question = (message.get("question") or "").strip()
+                if not question:
                     await manager.send_personal_message(
-                        json.dumps({
-                            "type": "error",
-                            "message": "An unexpected error occurred"
-                        }),
-                        websocket
+                        json.dumps({"type": "error", "message": "Question cannot be empty"}),
+                        websocket,
                     )
-                except:
-                    pass
-                break
-                
-    except Exception as e:
-        logger.error(f"WebSocket connection error: {str(e)}", exc_info=True)
+                    continue
+
+                chat_history = message.get("chat_history", [])
+
+                existing_task = manager.get_task(websocket)
+                if existing_task and not existing_task.done():
+                    logger.info("Cancelling previous generation task before starting new query")
+                    existing_task.cancel()
+                    try:
+                        await existing_task
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        manager.clear_task(websocket)
+
+                task = asyncio.create_task(
+                    _process_websocket_query(websocket, question, chat_history)
+                )
+                manager.set_task(websocket, task)
+                task.add_done_callback(lambda t, ws=websocket: manager.clear_task(ws))
+                continue
+
+            if msg_type == "stop_generation":
+                task = manager.get_task(websocket)
+                if task and not task.done():
+                    logger.info("Received stop generation request")
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        manager.clear_task(websocket)
+                else:
+                    await manager.send_personal_message(
+                        json.dumps({"type": "status", "status": "idle"}),
+                        websocket,
+                    )
+                continue
+
+            await manager.send_personal_message(
+                json.dumps({"type": "error", "message": "Unsupported message type"}),
+                websocket,
+            )
+
+    except Exception as exc:
+        logger.error("WebSocket connection error", error=str(exc), exc_info=True)
     finally:
-        # Ensure the connection is properly closed
         try:
+            task = manager.get_task(websocket)
+            if task and not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
             manager.disconnect(websocket)
-            logger.info(f"WebSocket connection closed for {getattr(websocket, 'client', 'unknown')}")
-        except Exception as e:
-            logger.error(f"Error closing WebSocket: {str(e)}")
+            logger.info("WebSocket connection closed", client=str(getattr(websocket, "client", "unknown")))
+        except Exception as exc:
+            logger.error("Error closing WebSocket", error=str(exc))
 
 # File management endpoints
 @app.get("/files")

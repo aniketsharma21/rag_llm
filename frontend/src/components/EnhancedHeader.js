@@ -6,10 +6,34 @@ import React from 'react';
  * - Clean, minimal header with just title and clear chat button
  * - Better responsive design
  */
-const EnhancedHeader = ({ onClearChat }) => {
+const STATUS_CONFIG = {
+  connected: {
+    label: 'Connected',
+    dot: 'bg-green-500',
+  },
+  connecting: {
+    label: 'Connecting…',
+    dot: 'bg-yellow-400',
+  },
+  disconnected: {
+    label: 'Disconnected',
+    dot: 'bg-red-500',
+  },
+};
+
+const EnhancedHeader = ({ onClearChat, connectionStatus = 'connected' }) => {
+  const statusConfig = STATUS_CONFIG[connectionStatus] || {
+    label: 'Unknown',
+    dot: 'bg-gray-400',
+  };
+
   return (
     <header className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-      <div className="flex items-center">
+      <div className="flex items-center space-x-3">
+        <div className="flex items-center text-xs font-medium text-gray-600 dark:text-gray-300">
+          <span className={`inline-block w-2 h-2 rounded-full mr-2 ${statusConfig.dot}`} aria-hidden="true" />
+          <span>{statusConfig.label}</span>
+        </div>
         <h1 className="text-xl font-semibold text-gray-900 dark:text-white">AI Assistant</h1>
       </div>
       
