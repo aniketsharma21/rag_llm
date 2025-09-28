@@ -221,9 +221,14 @@ def process_document(file_path):
     try:
         loader = _get_loader(file_path)
         docs = loader.load()
+    except DocumentProcessingError:
+        raise
     except Exception as e:
-        logger.error(f"Error loading document {os.path.basename(file_path)}: {e}")
-        return None
+        logger.error("Error loading document", file_name=os.path.basename(file_path), error=str(e))
+        raise DocumentProcessingError(
+            f"Failed to load document: {e}",
+            {"file_path": file_path, "error": str(e)},
+        ) from e
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,

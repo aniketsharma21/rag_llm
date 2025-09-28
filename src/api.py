@@ -7,13 +7,8 @@ document ingestion and querying. Includes WebSocket support for real-time update
 import os
 import json
 import asyncio
-import tempfile
 import time
-import re
-from operator import itemgetter
 from typing import List, Optional, Dict, Any
-import pickle
-import uuid
 from datetime import datetime
 import contextlib
 from urllib.parse import quote
@@ -21,209 +16,36 @@ from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
-from fastapi.concurrency import run_in_threadpool
 import uvicorn
 from pydantic import BaseModel, Field, validator
-from langchain.prompts import PromptTemplate
-from langchain.schema.output_parser import StrOutputParser
-import yaml
-from src.ingest import process_document
-from src.embed_store import build_vector_store, get_retriever, load_vector_store
-from src.llm import get_llm, EnhancedRAGChain
-from src.config import PROMPTS_DIR, BASE_DIR
+from src.llm import get_llm
 from src.logging_config import get_logger
 from src.exceptions import (
-    RAGException, DocumentProcessingError, VectorStoreError, 
-    LLMError, ValidationError, ConversationError
+    RAGException,
+    DocumentProcessingError,
+    VectorStoreError,
+    LLMError,
+    ValidationError,
+    ConversationError,
 )
-from src.database import ConversationManager, DocumentManager
-from src.job_manager import job_manager, JobNotFoundError
+from src.db.repositories import ConversationRepository, JobRepository
+from src.db.session import get_session, init_database
+from src.services.ingestion_service import IngestionService
+from src.services.rag_service import RAGService, RAGApplicationService
+from src.middleware.observability import setup_observability
 
 # Initialize logger
 logger = get_logger(__name__)
 
-SUPERSCRIPT_MAP = {
-    "0": "\u2070",
-    "1": "\u00B9",
-    "2": "\u00B2",
-    "3": "\u00B3",
-    "4": "\u2074",
-    "5": "\u2075",
-    "6": "\u2076",
-    "7": "\u2077",
-    "8": "\u2078",
-    "9": "\u2079",
-}
-
-
-def _format_superscript(number: int) -> str:
-    return "".join(SUPERSCRIPT_MAP.get(ch, ch) for ch in str(number))
-
-
-def _normalize_source_payload(
-    source_data: Dict[str, Any],
-    index: int,
-    default_confidence: Optional[float] = None
-) -> Dict[str, Any]:
-    source = dict(source_data or {})
-    metadata = dict(source.get("metadata", {}) or {})
-
-    raw_path = (
-        source.get("raw_file_path")
-        or source.get("source_file")
-        or metadata.get("raw_file_path")
-        or metadata.get("source")
-    )
-    if raw_path:
-        raw_path = os.path.abspath(raw_path)
-
-    source_display_path = source.get("source_display_path") or metadata.get("source_display_path")
-    if not source_display_path and raw_path:
-        try:
-            source_display_path = os.path.relpath(raw_path, BASE_DIR)
-        except Exception:
-            source_display_path = raw_path
-
-    display_name = source.get("source_display_name") or metadata.get("source_display_name")
-    if not display_name and raw_path:
-        display_name = os.path.basename(raw_path)
-    if not display_name:
-        display_name = f"Document {index}"
-
-    content = source.get("content") or metadata.get("content")
-
-    snippet = (
-        source.get("snippet")
-        or metadata.get("snippet")
-        or (content.strip() if isinstance(content, str) else None)
-    )
-    if snippet:
-        snippet = snippet.strip()
-        if len(snippet) > 320:
-            truncated = snippet[:320].rsplit(" ", 1)[0]
-            snippet = f"{truncated}…" if truncated else snippet[:320] + "…"
-
-    citation = source.get("citation") or _format_superscript(source.get("id", index))
-
-    page_number = source.get("page_number") or source.get("page")
-    if page_number is None:
-        if isinstance(metadata.get("page_number"), int):
-            page_number = metadata.get("page_number")
-        elif isinstance(metadata.get("page"), int):
-            page_number = metadata.get("page") + 1
-
-    preview_url = source.get("preview_url") or metadata.get("preview_url")
-    if not preview_url and raw_path:
-        filename = os.path.basename(raw_path)
-        if filename:
-            preview_url = f"/files/preview/{quote(filename)}"
-
-    page_label = source.get("page_label") or metadata.get("page_label")
-    if not page_label and page_number is not None:
-        page_label = f"Page {page_number}"
-
-    url = preview_url
-    if not url and raw_path:
-        url = f"file://{raw_path}"
-        if isinstance(page_number, int):
-            url = f"{url}#page={page_number}"
-
-    # Ensure metadata includes enriched fields for downstream consumers
-    metadata.update({
-        "raw_file_path": raw_path,
-        "source_display_path": source_display_path,
-        "source_display_name": display_name,
-        "snippet": snippet,
-        "page_number": page_number,
-        "page_label": page_label,
-        "preview_url": preview_url,
-    })
-
-    payload: Dict[str, Any] = {
-        "id": source.get("id", index),
-        "citation": citation,
-        "name": display_name,
-        "display_name": display_name,
-        "content": content,
-        "snippet": snippet,
-        "source_file": raw_path,
-        "raw_file_path": raw_path,
-        "source_display_path": source_display_path,
-        "page": page_number,
-        "page_number": page_number,
-        "page_label": page_label,
-        "relevance_score": source.get("relevance_score") or metadata.get("relevance_score"),
-        "confidence": source.get("confidence") or default_confidence,
-        "metadata": metadata,
-        "preview_url": preview_url,
-        "url": url,
-    }
-
-    for key in ("bm25_score", "retrieval_rank", "chunk_index"):
-        if key in source:
-            payload[key] = source[key]
-        elif key in metadata:
-            payload[key] = metadata[key]
-
-    return payload
-
-
-def _apply_superscript_citations(answer: str, sources: List[Dict[str, Any]]) -> str:
-    if not sources:
-        return answer
-
-    formatted_answer = (answer or "").rstrip()
-
-    # Remove any existing Sources block to prevent duplication
-    if "\nSources:" in formatted_answer:
-        formatted_answer = formatted_answer.split("\nSources:", 1)[0].rstrip()
-
-    entries = []
-    for source in sources:
-        display_name = (
-            source.get("source_display_name")
-            or source.get("display_name")
-            or source.get("name")
-            or source.get("source_file")
-            or "Source"
-        )
-
-        page_label = source.get("page_label")
-        if not page_label:
-            page_number = source.get("page") or source.get("page_number")
-            if isinstance(page_number, int):
-                page_label = f"Page {page_number}"
-
-        entry = f"- {display_name}"
-        if page_label:
-            entry += f" — {page_label}"
-
-        metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
-        section = metadata.get("section")
-        if section:
-            entry += f" (Section: {section})"
-
-        entries.append(entry)
-
-    if entries:
-        formatted_answer = f"{formatted_answer}\n\nSources:\n" + "\n".join(entries)
-
-    return formatted_answer
-
-
-def _clean_answer_text(answer: str) -> str:
-    if not answer:
-        return ""
-
-    cleaned = answer.strip()
-    cleaned = re.sub(r"\n+Sources?:.*$", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    return cleaned
+ingestion_service = IngestionService()
+rag_service = RAGService()
+app_service = RAGApplicationService(ingestion_service, rag_service)
 
 
 def _get_files_inventory() -> List[Dict[str, Any]]:
     from src.config import RAW_DATA_DIR
-    inventory = []
+
+    inventory: List[Dict[str, Any]] = []
     if not os.path.exists(RAW_DATA_DIR):
         return inventory
 
@@ -249,6 +71,13 @@ app = FastAPI(
     description="API for document ingestion and question answering using RAG",
     version="0.2.0"
 )
+
+setup_observability(app)
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    await init_database()
 
 # CORS middleware configuration
 app.add_middleware(
@@ -459,132 +288,6 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# Global enhanced RAG chain instance
-enhanced_rag_chain = None
-
-def get_enhanced_rag_chain():
-    """Get or create the enhanced RAG chain instance."""
-    global enhanced_rag_chain
-    
-    if enhanced_rag_chain is None:
-        try:
-            vectordb = load_vector_store()
-            if not vectordb:
-                logger.warning("Vector store not found, cannot create enhanced RAG chain")
-                return None
-            
-            # Load all processed documents for BM25 retrieval
-            from src.config import PROCESSED_DATA_DIR
-            documents = []
-            
-            if os.path.exists(PROCESSED_DATA_DIR):
-                for filename in os.listdir(PROCESSED_DATA_DIR):
-                    if filename.endswith('_chunks.pkl'):
-                        chunk_path = os.path.join(PROCESSED_DATA_DIR, filename)
-                        try:
-                            with open(chunk_path, 'rb') as f:
-                                chunks = pickle.load(f)
-                                documents.extend(chunks)
-                        except Exception as e:
-                            logger.warning(f"Failed to load chunks from {filename}: {e}")
-            
-            if documents:
-                enhanced_rag_chain = EnhancedRAGChain(vectordb, documents)
-                logger.info(f"Created enhanced RAG chain with {len(documents)} documents")
-            else:
-                logger.warning("No documents found for enhanced RAG chain")
-                return None
-                
-        except Exception as e:
-            logger.error(f"Failed to create enhanced RAG chain: {e}")
-            return None
-    
-    return enhanced_rag_chain
-
-def reset_enhanced_rag_chain():
-    """Reset the enhanced RAG chain (call after new documents are added)."""
-    global enhanced_rag_chain
-    enhanced_rag_chain = None
-
-
-async def _run_ingest_job(job_id: str, file_path: str, original_filename: str) -> None:
-    """Execute ingest workflow in the background and update job status."""
-    try:
-        job_manager.update_job(
-            job_id,
-            status="processing",
-            message="Chunking document",
-            details={"file_path": file_path},
-        )
-
-        chunks = await run_in_threadpool(process_document, file_path)
-
-        if not chunks:
-            job_manager.update_job(
-                job_id,
-                status="skipped",
-                message="Document unchanged; using cached chunks",
-            )
-            logger.info(
-                "Ingest job skipped (no changes detected)",
-                job_id=job_id,
-                file_path=file_path,
-            )
-            return
-
-        job_manager.update_job(
-            job_id,
-            message="Creating embeddings",
-            details={"chunks_count": len(chunks)},
-        )
-
-        await run_in_threadpool(build_vector_store, chunks)
-
-        # Ensure downstream queries pick up the latest store
-        reset_enhanced_rag_chain()
-
-        job_manager.update_job(
-            job_id,
-            status="completed",
-            message="Document processed successfully",
-            details={"chunks_count": len(chunks)},
-        )
-
-        logger.info(
-            "Ingest job completed",
-            job_id=job_id,
-            file_path=file_path,
-            chunks=len(chunks),
-        )
-
-    except Exception as exc:
-        logger.error(
-            "Ingest job failed",
-            job_id=job_id,
-            file_path=file_path,
-            error=str(exc),
-            exc_info=True,
-        )
-
-        job_manager.update_job(
-            job_id,
-            status="failed",
-            message="Document processing failed",
-            error=str(exc),
-        )
-
-        # Clean up the stored file on failure to allow retry
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-        except Exception as cleanup_error:
-            logger.warning(
-                "Failed to cleanup file after ingest failure",
-                job_id=job_id,
-                file_path=file_path,
-                error=str(cleanup_error),
-            )
-
 # Health check endpoint
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
@@ -611,89 +314,48 @@ async def ingest_document(file: UploadFile = File(...)):
         file: The document file to upload (PDF, DOCX, TXT, CSV, JSON, MD, PPTX, XLSX)
     """
     try:
-        from src.config import RAW_DATA_DIR
-
-        job_id = str(uuid.uuid4())
-        job_manager.create_job(job_id, file.filename, message="Upload received")
-
-        # Ensure raw data directory exists
-        os.makedirs(RAW_DATA_DIR, exist_ok=True)
-
-        # Save the uploaded file to /data/raw with original filename
-        file_extension = os.path.splitext(file.filename)[1]
-        safe_filename = file.filename.replace(" ", "_").replace("..", "")
-        permanent_file_path = os.path.join(RAW_DATA_DIR, safe_filename)
-
-        # Handle duplicate filenames by adding a counter
-        counter = 1
-        original_path = permanent_file_path
-        while os.path.exists(permanent_file_path):
-            name_without_ext = os.path.splitext(safe_filename)[0]
-            permanent_file_path = os.path.join(RAW_DATA_DIR, f"{name_without_ext}_{counter}{file_extension}")
-            counter += 1
-
-        # Write the uploaded file to permanent location
-        with open(permanent_file_path, "wb") as f:
-            f.write(await file.read())
-
-        logger.info(f"Saved uploaded file to: {permanent_file_path}")
-
-        job_manager.update_job(
-            job_id,
-            status="queued",
-            message="File stored; scheduling processing",
-            details={"file_path": permanent_file_path},
-        )
-
-        asyncio.create_task(_run_ingest_job(job_id, permanent_file_path, file.filename))
+        job_id, file_path = await app_service.ingest_document(file)
 
         return IngestResponse(
             job_id=job_id,
             status="queued",
             message=f"Document '{file.filename}' received. Processing has started.",
         )
-            
-    except Exception as e:
-        logger.error(f"Error processing document: {str(e)}")
-        # Clean up file if processing failed
-        if 'permanent_file_path' in locals() and os.path.exists(permanent_file_path):
-            try:
-                os.remove(permanent_file_path)
-                logger.info(f"Cleaned up failed upload: {permanent_file_path}")
-            except Exception as cleanup_error:
-                logger.warning(f"Failed to cleanup file: {cleanup_error}")
-        
+
+    except Exception as exc:
+        logger.error("Error processing document", error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing document: {str(e)}"
+            detail=f"Error processing document: {exc}",
         )
+    finally:
+        await file.close()
 
 
 @app.get("/status/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str):
     """Return current status for a previously submitted ingest job."""
-    try:
-        record = job_manager.get_job(job_id)
-    except JobNotFoundError:
+    record = await app_service.get_job_status(job_id)
+
+    if record is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    data = record.to_dict()
     return JobStatusResponse(
-        job_id=data["job_id"],
-        file_name=data["file_name"],
-        status=data["status"],
-        message=data.get("message"),
-        details=data.get("details", {}),
-        error=data.get("error"),
-        created_at=data["created_at"],
-        updated_at=data["updated_at"],
+        job_id=record["job_id"],
+        file_name=record["file_name"],
+        status=record["status"],
+        message=record.get("message"),
+        details=record.get("details", {}),
+        error=record.get("error"),
+        created_at=record["created_at"],
+        updated_at=record["updated_at"],
     )
 
 
 @app.get("/files")
 async def list_uploaded_files():
     try:
-        files = await run_in_threadpool(_get_files_inventory)
+        files = await asyncio.to_thread(_get_files_inventory)
         return {"files": files}
     except Exception as exc:
         logger.error("Failed to list uploaded files", error=str(exc))
@@ -704,6 +366,7 @@ async def _process_websocket_query(
     websocket: WebSocket,
     question: str,
     chat_history: List[Dict[str, Any]],
+    conversation_id: Optional[int] = None,
 ) -> None:
     """Process a single WebSocket query message and stream the answer."""
     await manager.send_personal_message(
@@ -711,182 +374,32 @@ async def _process_websocket_query(
         websocket,
     )
 
-    enhanced_chain = get_enhanced_rag_chain()
-
     try:
-        if enhanced_chain:
-            result = enhanced_chain.query(
-                question=question,
-                template_type=None,
-                k=5,
-                include_sources=True,
-                conversation_context=bool(chat_history),
-            )
+        result = await app_service.query(
+            question=question,
+            chat_history=chat_history,
+            conversation_id=conversation_id,
+        )
 
-            raw_sources = result.get("sources", [])
-            formatted_sources = [
-                _normalize_source_payload(source, idx + 1, result.get("confidence_score"))
-                for idx, source in enumerate(raw_sources)
-            ]
-
-            raw_answer = result.get("answer", "") or ""
-            formatted_answer = _apply_superscript_citations(
-                raw_answer,
-                formatted_sources,
-            )
-            formatted_answer = _clean_answer_text(formatted_answer)
-
-            paragraphs = [p.strip() for p in formatted_answer.split("\n\n") if p.strip()]
-            if paragraphs:
-                summary = paragraphs[0]
-                await manager.send_personal_message(
-                    json.dumps({
-                        "type": "chunk",
-                        "content": summary,
-                        "role": "summary",
-                    }),
-                    websocket,
-                )
-                await asyncio.sleep(0.05)
-
-                for paragraph in paragraphs[1:]:
-                    await manager.send_personal_message(
-                        json.dumps({
-                            "type": "chunk",
-                            "content": paragraph,
-                        }),
-                        websocket,
-                    )
-                    await asyncio.sleep(0.05)
-
-            await manager.send_personal_message(
-                json.dumps({
+        await manager.send_personal_message(
+            json.dumps(
+                {
                     "type": "complete",
-                    "content": formatted_answer,
-                    "sources": formatted_sources,
+                    "content": result["answer"],
+                    "sources": result.get("sources", []),
                     "confidence_score": result.get("confidence_score"),
                     "template_used": result.get("template_used"),
                     "num_sources": result.get("num_sources"),
-                }),
-                websocket,
-            )
-            return
-
-        # Fallback path
-        llm = get_llm()
-        vectordb = load_vector_store()
-        if not vectordb:
-            await manager.send_personal_message(
-                json.dumps({
-                    "type": "error",
-                    "message": "Vector store not found. Please upload and ingest a document first.",
-                }),
-                websocket,
-            )
-            return
-
-        retriever = get_retriever(vectordb)
-        if not retriever:
-            await manager.send_personal_message(
-                json.dumps({
-                    "type": "error",
-                    "message": "Retriever could not be created.",
-                }),
-                websocket,
-            )
-            return
-
-        formatted_history = "\n".join([
-            f"{'User' if msg.get('role') == 'user' else 'Assistant'}: {msg.get('content', '')}"
-            for msg in chat_history
-            if isinstance(msg, dict)
-        ])
-
-        template = (
-            "You are a helpful AI assistant. Use the following pieces of context to answer the question at the end.\n"
-            "If you don't know the answer, just say that you don't know, don't try to make up an answer.\n\n"
-            "Context:\n{context}\n\nChat History:\n{chat_history}\n\nQuestion: {question}\nAnswer:"
-        )
-
-        prompt = PromptTemplate(
-            template=template,
-            input_variables=["context", "chat_history", "question"],
-        )
-
-        async def get_context(x):
-            docs = await retriever.ainvoke(x["question"])
-            context = "\n\n".join([
-                f"[Source: {getattr(d, 'metadata', {}).get('source', 'unknown')}] {d.page_content}"
-                for d in docs
-            ])
-            x["_retrieved_docs"] = docs
-            return context
-
-        rag_chain = (
-            {
-                "context": get_context,
-                "chat_history": lambda x: x["chat_history"],
-                "question": lambda x: x["question"],
-            }
-            | prompt
-            | llm
-            | StrOutputParser()
-        )
-
-        input_obj = {"question": question, "chat_history": formatted_history}
-        full_response = ""
-
-        async for chunk in rag_chain.astream(input_obj):
-            if chunk and isinstance(chunk, str):
-                full_response += chunk
-
-        docs = input_obj.get("_retrieved_docs", [])
-        formatted_sources = [
-            _normalize_source_payload(
-                {
-                    "id": idx + 1,
-                    "content": getattr(doc, "page_content", ""),
-                    "metadata": getattr(doc, "metadata", {}),
-                },
-                idx + 1,
-            )
-            for idx, doc in enumerate(docs)
-        ]
-
-        formatted_response = _apply_superscript_citations(full_response, formatted_sources)
-        formatted_response = _clean_answer_text(formatted_response)
-
-        paragraphs = [p.strip() for p in formatted_response.split("\n\n") if p.strip()]
-        if paragraphs:
-            await manager.send_personal_message(
-                json.dumps({
-                    "type": "chunk",
-                    "content": paragraphs[0],
-                    "role": "summary",
-                }),
-                websocket,
-            )
-            await asyncio.sleep(0.05)
-
-            for paragraph in paragraphs[1:]:
-                await manager.send_personal_message(
-                    json.dumps({
-                        "type": "chunk",
-                        "content": paragraph,
-                    }),
-                    websocket,
-                )
-                await asyncio.sleep(0.05)
-
-        await manager.send_personal_message(
-            json.dumps({
-                "type": "complete",
-                "content": formatted_response,
-                "sources": formatted_sources,
-            }),
+                }
+            ),
             websocket,
         )
 
+    except RuntimeError as exc:
+        await manager.send_personal_message(
+            json.dumps({"type": "error", "message": str(exc)}),
+            websocket,
+        )
     except asyncio.CancelledError:
         logger.info("Generation cancelled for WebSocket client", websocket_client=str(getattr(websocket, "client", "unknown")))
         await manager.send_personal_message(
@@ -912,111 +425,27 @@ async def query_rag(query: QueryRequest):
         query: The query request containing the question and optional chat history
     """
     try:
-        # Try to use enhanced RAG chain first
-        enhanced_chain = get_enhanced_rag_chain()
-        
-        if enhanced_chain:
-            # Use enhanced RAG chain with hybrid retrieval
-            result = enhanced_chain.query(
-                question=query.question,
-                template_type=None,  # Auto-select template
-                k=5,
-                include_sources=True,
-                conversation_context=bool(query.chat_history)
-            )
-            
-            raw_sources = result.get("sources", [])
-            formatted_sources = [
-                _normalize_source_payload(source, idx + 1, result.get("confidence_score"))
-                for idx, source in enumerate(raw_sources)
-            ]
+        result = await app_service.query(
+            question=query.question,
+            chat_history=query.chat_history or [],
+            conversation_id=query.conversation_id,
+        )
 
-            answer = _apply_superscript_citations(result.get("answer", ""), formatted_sources)
+        return QueryResponse(
+            answer=result["answer"],
+            sources=result.get("sources", []),
+            confidence_score=result.get("confidence_score"),
+            template_used=result.get("template_used"),
+            num_sources=result.get("num_sources"),
+        )
 
-            return QueryResponse(
-                answer=answer,
-                sources=formatted_sources,
-                confidence_score=result.get("confidence_score"),
-                template_used=result.get("template_used"),
-                num_sources=result.get("num_sources")
-            )
-        
-        else:
-            # Fallback to original RAG implementation
-            logger.warning("Enhanced RAG chain not available, using fallback")
-            
-            llm = get_llm()
-            vectordb = load_vector_store()
-            if not vectordb:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Vector store not found. Please upload and ingest a document first."
-                )
-            retriever = get_retriever(vectordb)
-            if not retriever:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Retriever could not be created."
-                )
-            
-            prompt_path = os.path.join(PROMPTS_DIR, "rag_prompts.yaml")
-            with open(prompt_path, 'r') as f:
-                prompt_config = yaml.safe_load(f)
-            template = prompt_config['template']
-
-            prompt = PromptTemplate(
-                template=template,
-                input_variables=["context", "question"]
-            )
-            
-            async def get_context(x):
-                docs = await retriever.ainvoke(x["question"])
-                context = "\n\n".join([
-                    f"[Source: {getattr(d, 'metadata', {}).get('source', 'unknown')}] {d.page_content}" for d in docs
-                ])
-                x["_retrieved_docs"] = docs  # Attach docs for later use
-                return context
-            
-            rag_chain = (
-                {"context": get_context, "question": lambda x: x["question"]}
-                | prompt
-                | llm
-                | StrOutputParser()
-            )
-            
-            # Run the chain and get docs
-            input_obj = {"question": query.question}
-            answer = await rag_chain.ainvoke(input_obj)
-            docs = input_obj.get("_retrieved_docs", [])
-            formatted_sources = [
-                _normalize_source_payload(
-                    {
-                        "id": idx + 1,
-                        "content": doc.page_content,
-                        "metadata": getattr(doc, 'metadata', {})
-                    },
-                    idx + 1
-                )
-                for idx, doc in enumerate(docs)
-            ]
-
-            answer = _apply_superscript_citations(answer, formatted_sources)
-            
-            return QueryResponse(
-                answer=answer,
-                sources=formatted_sources,
-                confidence_score=None,
-                template_used="fallback",
-                num_sources=len(formatted_sources)
-            )
-            
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error(f"Error processing query: {str(e)}")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error processing query", error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing query: {str(e)}"
+            detail=f"Error processing query: {exc}",
         )
 
 # WebSocket endpoint for chat
@@ -1072,6 +501,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 chat_history = message.get("chat_history", [])
+                conversation_id = None
+                raw_conversation_id = message.get("conversation_id")
+                if raw_conversation_id is not None:
+                    try:
+                        conversation_id = int(raw_conversation_id)
+                    except (TypeError, ValueError):
+                        logger.warning(
+                            "Invalid conversation_id received",
+                            value=raw_conversation_id,
+                        )
 
                 existing_task = manager.get_task(websocket)
                 if existing_task and not existing_task.done():
@@ -1085,7 +524,12 @@ async def websocket_endpoint(websocket: WebSocket):
                         manager.clear_task(websocket)
 
                 task = asyncio.create_task(
-                    _process_websocket_query(websocket, question, chat_history)
+                    _process_websocket_query(
+                        websocket,
+                        question,
+                        chat_history,
+                        conversation_id,
+                    )
                 )
                 manager.set_task(websocket, task)
                 task.add_done_callback(lambda t, ws=websocket: manager.clear_task(ws))
@@ -1129,20 +573,6 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.error("Error closing WebSocket", error=str(exc))
 
 # File management endpoints
-@app.get("/files")
-def list_files():
-    """List uploaded/ingested files with metadata and preview URLs."""
-    data_dir = os.path.join(os.path.dirname(__file__), '..', 'data', 'raw')
-    files = []
-    for fname in os.listdir(data_dir):
-        fpath = os.path.join(data_dir, fname)
-        if os.path.isfile(fpath):
-            files.append({
-                'name': fname,
-                'url': f"/files/preview/{fname}"
-            })
-    return {"files": files}
-
 @app.get("/files/preview/{filename}")
 def preview_file(filename: str):
     """Serve a file for preview (PDF, etc)."""
@@ -1165,84 +595,88 @@ def preview_file(filename: str):
 @app.get("/conversations", response_model=ConversationListResponse)
 async def list_conversations(user_id: str = "default_user", limit: int = 50):
     """List conversations for a user."""
+    start_time = time.perf_counter()
     try:
-        start_time = time.time()
-        conversations = ConversationManager.list_conversations(user_id, limit)
-        duration = time.time() - start_time
-        
-        logger.info("Listed conversations", 
-                   user_id=user_id, 
-                   count=len(conversations), 
-                   duration=duration)
-        
-        return ConversationListResponse(
-            conversations=conversations,
-            total=len(conversations)
+        conversations = await app_service.list_conversations(user_id=user_id, limit=limit)
+        duration = time.perf_counter() - start_time
+        logger.info(
+            "Listed conversations",
+            user_id=user_id,
+            count=len(conversations),
+            duration=duration,
         )
-    except ConversationError as e:
-        raise e
-    except Exception as e:
-        logger.error("Unexpected error listing conversations", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to list conversations")
+        return ConversationListResponse(conversations=conversations, total=len(conversations))
+    except ConversationError as exc:
+        raise exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error("Unexpected error listing conversations", error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to list conversations") from exc
+
 
 @app.get("/conversations/{conversation_id}", response_model=ConversationResponse)
 async def get_conversation(conversation_id: int):
     """Get a specific conversation by ID."""
     try:
-        conversation = ConversationManager.get_conversation(conversation_id)
+        conversation = await app_service.get_conversation(conversation_id)
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        
+
         logger.info("Retrieved conversation", conversation_id=conversation_id)
         return ConversationResponse(**conversation)
-    except ConversationError as e:
-        raise e
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error("Unexpected error getting conversation", 
-                    conversation_id=conversation_id, error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to get conversation")
+    except ConversationError as exc:
+        raise exc
+    except HTTPException as exc:
+        raise exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error(
+            "Unexpected error getting conversation",
+            conversation_id=conversation_id,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=500, detail="Failed to get conversation") from exc
+
 
 @app.post("/conversations", response_model=ConversationResponse)
 async def create_conversation(request: ConversationCreateRequest):
     """Create a new conversation."""
     try:
-        conversation = ConversationManager.create_conversation(
-            title=request.title.strip(),
-            messages=[],
-            user_id=request.user_id
+        conversation = await app_service.create_conversation(request.title, request.user_id)
+
+        logger.info(
+            "Created new conversation",
+            conversation_id=conversation["id"],
+            title=request.title,
         )
-        
-        logger.info("Created new conversation", 
-                   conversation_id=conversation["id"], 
-                   title=request.title)
-        
+
         return ConversationResponse(**conversation)
-    except ConversationError as e:
-        raise e
-    except Exception as e:
-        logger.error("Unexpected error creating conversation", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to create conversation")
+    except ConversationError as exc:
+        raise exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error("Unexpected error creating conversation", error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to create conversation") from exc
+
 
 @app.delete("/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: int):
     """Delete a conversation."""
     try:
-        success = ConversationManager.delete_conversation(conversation_id)
+        success = await app_service.delete_conversation(conversation_id)
         if not success:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        
+
         logger.info("Deleted conversation", conversation_id=conversation_id)
         return {"message": "Conversation deleted successfully"}
-    except ConversationError as e:
-        raise e
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error("Unexpected error deleting conversation", 
-                    conversation_id=conversation_id, error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to delete conversation")
+    except ConversationError as exc:
+        raise exc
+    except HTTPException as exc:
+        raise exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error(
+            "Unexpected error deleting conversation",
+            conversation_id=conversation_id,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=500, detail="Failed to delete conversation") from exc
 
 
 if __name__ == "__main__":

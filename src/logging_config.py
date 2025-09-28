@@ -9,6 +9,7 @@ import os
 import sys
 import logging
 import structlog
+from structlog.contextvars import bind_contextvars, clear_contextvars
 from pythonjsonlogger import jsonlogger
 from typing import Any, Dict
 
@@ -41,6 +42,7 @@ def setup_logging(log_level: str = None, json_logs: bool = None) -> None:
     if json_logs:
         processors = [
             structlog.stdlib.filter_by_level,
+            structlog.contextvars.merge_contextvars,
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             structlog.stdlib.PositionalArgumentsFormatter(),
@@ -54,6 +56,7 @@ def setup_logging(log_level: str = None, json_logs: bool = None) -> None:
         # Use simple console logging for development
         processors = [
             structlog.stdlib.filter_by_level,
+            structlog.contextvars.merge_contextvars,
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             structlog.stdlib.PositionalArgumentsFormatter(),
@@ -151,6 +154,48 @@ def log_performance(operation: str, duration: float, **kwargs) -> Dict[str, Any]
         "duration_seconds": duration,
         **kwargs
     }
+
+
+def set_request_context(request_id: str = None, client_ip: str = None, user_agent: str = None) -> None:
+    """Bind request-level context variables for structured logging."""
+    context = {}
+    if request_id:
+        context["request_id"] = request_id
+    if client_ip:
+        context["client_ip"] = client_ip
+    if user_agent:
+        context["user_agent"] = user_agent
+    if context:
+        bind_contextvars(**context)
+
+
+def clear_request_context() -> None:
+    """Clear any bound request context variables."""
+    clear_contextvars()
+
+
+def request_log_entry(
+    *,
+    method: str,
+    path: str,
+    status_code: int,
+    duration_seconds: float,
+    request_id: str | None = None,
+    client_ip: str | None = None,
+) -> Dict[str, Any]:
+    """Structured payload for request trace logs."""
+    payload: Dict[str, Any] = {
+        "event": "http_request",
+        "method": method,
+        "path": path,
+        "status_code": status_code,
+        "duration_seconds": round(duration_seconds, 6),
+    }
+    if request_id:
+        payload["request_id"] = request_id
+    if client_ip:
+        payload["client_ip"] = client_ip
+    return payload
 
 
 # Initialize logging when module is imported

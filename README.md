@@ -25,6 +25,9 @@ A robust, modular, and production-oriented framework for building Retrieval-Augm
 -   **Structured Logging & Exceptions** (`src/logging_config.py`, `src/exceptions.py`): JSON logs, contextual metadata, and domain-specific exception hierarchy.
 -   **Persistence Layer** (`src/database.py`): SQLAlchemy models for conversation/document history with CRUD helpers.
 -   **Streaming UX** (`src/api.py`, `frontend/src/App.js`): Summaries stream before detail paragraphs, stop-generation is honored immediately, and chat messages merge role-tagged chunks automatically.
+-   **Service Layer Abstractions** (`src/services/ingestion_service.py`, `src/services/rag_service.py`): API endpoints now orchestrate ingestion and query flows through dedicated services with improved error handling and async patterns.
+-   **Shared Frontend Configuration** (`frontend/src/context/ConfigContext.js`): Centralized WebSocket/API configuration exposed through a React context provider, simplifying consumption in `App.js` and upload/chat components.
+-   **Test Coverage** (`tests/test_ingestion_service.py`, `tests/test_rag_service.py`): Added focused unit suites for the new services and updated ingestion tests to rely on temporary fixtures instead of cached artifacts.
 -   **Rich Source Cards** (`frontend/src/components/EnhancedMessage.js`): Document-level aggregation with snippets, page ranges, relevance hints, preview buttons, and accessibility tweaks.
 -   **Upload Workbench** (`frontend/src/components/EnhancedFileUpload.js` + `/files` endpoint): Drag & drop uploads with history, toast feedback, and inline PDF preview modals backed by sanitized download URLs.
 
@@ -77,9 +80,9 @@ rag_llm/
         # Or with a standard virtual environment
         python -m venv venv
         source venv/bin/activate  # On Windows: venv\Scripts\activate
-        pip install -r requirements.txt
+        pip install -r requirements.txt -r requirements-clean.txt
         ```
-    -   **Configure Environment Variables**: Create a `.env` file in the project root.
+    -   **Configure Environment Variables**: Runtime configuration is powered by the [`AppSettings`](src/config.py) Pydantic settings object, which merges `.env` values with optional `config.yaml` defaults. Create a `.env` file in the project root to supply required secrets.
         ```env
         # Required for LLM integration
         GROQ_API_KEY=your_groq_api_key_here
@@ -87,6 +90,7 @@ rag_llm/
         # Optional: For using OpenAI models
         OPENAI_API_KEY=your_openai_key_here
         ```
+        You can also populate `config.yaml` with non-secret defaults (for example, `chunk_size`, `embedding_model`). Both files are loaded automatically during startup.
 
 3.  **Set Up the Frontend**
     ```bash

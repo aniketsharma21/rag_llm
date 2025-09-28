@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import { useConfig } from '../context/ConfigContext';
 
 /**
  * A simple modal component for displaying a preview of a file.
@@ -74,7 +75,7 @@ function FileUpload() {
   const [isDragOver, setIsDragOver] = useState(false); // Track drag over state for visual feedback
 
   // Constants
-  const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8000';
+  const { apiBaseUrl } = useConfig();
   const MAX_SIZE_MB = 10;
   const ALLOWED_TYPES = ['application/pdf'];
 
@@ -85,7 +86,7 @@ function FileUpload() {
   useEffect(() => {
     async function fetchHistory() {
       try {
-        const res = await axios.get(`${API_BASE}/files`);
+        const res = await axios.get(`${apiBaseUrl}/files`);
         setUploadHistory(res.data.files || []);
       } catch (e) {
         console.error("Failed to fetch upload history:", e);
@@ -126,7 +127,7 @@ function FileUpload() {
     setUploadProgress(0);
 
     try {
-      const response = await axios.post(`${API_BASE}/ingest`, formData, {
+      const response = await axios.post(`${apiBaseUrl}/ingest`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);

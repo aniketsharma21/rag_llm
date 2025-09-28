@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, UTC
 from threading import Lock
 from typing import Dict, Any, Optional
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
 
 
 class JobNotFoundError(Exception):
@@ -19,8 +23,8 @@ class JobRecord:
     message: Optional[str] = None
     details: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=_utcnow)
+    updated_at: datetime = field(default_factory=_utcnow)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -78,7 +82,7 @@ class JobManager:
             if error is not None:
                 record.error = error
 
-            record.updated_at = datetime.utcnow()
+            record.updated_at = _utcnow()
             return record
 
 

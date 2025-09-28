@@ -111,15 +111,13 @@ class EnhancedRAGChain:
             logger.warning("Failed to initialize advanced retriever", error=str(e))
             self.advanced_retriever = None
         
-        self.conversation_history = []
-    
     def query(
-        self, 
-        question: str, 
+        self,
+        question: str,
         template_type: Optional[str] = None,
         k: int = 5,
         include_sources: bool = True,
-        conversation_context: bool = True
+        chat_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Process a query using enhanced RAG with hybrid retrieval.
@@ -129,19 +127,28 @@ class EnhancedRAGChain:
             template_type: Specific prompt template to use
             k: Number of documents to retrieve
             include_sources: Whether to include source attribution
-            conversation_context: Whether to use conversation history
+            chat_history: Conversation messages for additional context
             
         Returns:
             Dictionary with answer, sources, and metadata
         """
         try:
-            logger.info("Processing RAG query", question=question, k=k)
+            history = chat_history or []
+            use_context = bool(history)
+
+            logger.info(
+                "Processing RAG query",
+                question=question,
+                k=k,
+                use_context=use_context,
+            )
             
             # Retrieve relevant documents
-            if conversation_context and self.advanced_retriever:
+            if use_context and self.advanced_retriever:
+                history_strings = self._prepare_history(history)
                 documents = self.advanced_retriever.retrieve_with_context(
                     question, 
-                    self._get_recent_history(),
+                    history_strings,
                     k=k
                 )
             else:
@@ -160,7 +167,7 @@ class EnhancedRAGChain:
                 question=question,
                 documents=documents,
                 template_type=template_type,
-                chat_history=self.conversation_history if conversation_context else None
+                chat_history=history if use_context else None,
             )
             
             # Generate response
@@ -173,16 +180,6 @@ class EnhancedRAGChain:
             
             # Calculate confidence score
             confidence_score = self._calculate_confidence_score(answer, documents)
-            
-            # Store in conversation history
-            if conversation_context:
-                self.conversation_history.append({
-                    "user": question,
-                    "assistant": answer
-                })
-                # Keep only recent history
-                if len(self.conversation_history) > 10:
-                    self.conversation_history.pop(0)
             
             result = {
                 "answer": answer,
@@ -204,6 +201,23 @@ class EnhancedRAGChain:
             logger.error("RAG query failed", question=question, error=str(e))
             raise LLMError(f"RAG query failed: {str(e)}", {"question": question, "error": str(e)})
     
+    def _prepare_history(self, chat_history: List[Dict[str, Any]]) -> List[str]:
+        """Convert structured chat history into flat strings for the retriever."""
+        history_strings: List[str] = []
+        for message in chat_history[-6:]:  # Limit to last 6 messages (3 exchanges)
+            content = message.get("content")
+            if not content:
+                continue
+            role = message.get("role", "")
+            if role == "user":
+                prefix = "User: "
+            elif role == "assistant":
+                prefix = "Assistant: "
+            else:
+                prefix = ""
+            history_strings.append(f"{prefix}{content}")
+        return history_strings
+
     def _extract_source_info(self, documents: List[Document], answer: str) -> List[Dict[str, Any]]:
         """Aggregate chunk metadata into document-level source entries."""
         grouped_sources: Dict[str, Dict[str, Any]] = {}
@@ -424,29 +438,9 @@ class EnhancedRAGChain:
             logger.warning("Failed to calculate confidence score", error=str(e))
             return 0.5
     
-    def _get_recent_history(self, max_exchanges: int = 3) -> List[str]:
-        """Get recent conversation history for context."""
-        if not self.conversation_history:
-            return []
-        
-        recent = self.conversation_history[-max_exchanges:]
-        history_strings = []
-        
-        for exchange in recent:
-            history_strings.append(exchange['user'])
-            history_strings.append(exchange['assistant'])
-        
-        return history_strings
-    
-    def clear_history(self):
-        """Clear conversation history."""
-        self.conversation_history = []
-        logger.info("Cleared conversation history")
-    
     def get_stats(self) -> Dict[str, Any]:
         """Get statistics about the RAG chain."""
         return {
-            "conversation_length": len(self.conversation_history),
             "retriever_type": type(self.retriever).__name__,
             "has_advanced_retriever": self.advanced_retriever is not None,
             "total_documents": len(self.documents)
