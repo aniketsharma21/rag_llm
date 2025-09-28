@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
 
 /**
@@ -32,6 +32,9 @@ const Toast = ({ message, type, onClose }) => {
 const PreviewModal = ({ file, onClose }) => {
   if (!file) return null;
 
+  const previewUrl = file.url || file.previewUrl;
+  const isPdf = typeof previewUrl === 'string' && file.name?.toLowerCase().endsWith('.pdf');
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex justify-center items-center animate-fade-in" onClick={onClose}>
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-11/12 h-5/6 flex flex-col max-w-4xl" onClick={e => e.stopPropagation()}>
@@ -52,15 +55,26 @@ const PreviewModal = ({ file, onClose }) => {
           </button>
         </div>
         <div className="flex-1 p-6">
-          {file.url && file.name.endsWith('.pdf') ? (
-            <iframe src={file.url} title="PDF Preview" width="100%" height="100%" className="rounded-lg" />
+          {isPdf && previewUrl ? (
+            <iframe src={previewUrl} title="PDF Preview" width="100%" height="100%" className="rounded-lg" />
           ) : (
             <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400">
               <div className="text-center">
                 <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                <p>No preview available for this file type</p>
+                {previewUrl ? (
+                  <a
+                    href={previewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-500 hover:text-blue-600"
+                  >
+                    Open file in a new tab
+                  </a>
+                ) : (
+                  <p>No preview available for this file type</p>
+                )}
               </div>
             </div>
           )}
@@ -86,8 +100,12 @@ function EnhancedFileUpload() {
   // Constants
   const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8000';
   const MAX_SIZE_MB = 10;
-  const ALLOWED_TYPES = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'];
-  const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.txt'];
+  const ALLOWED_TYPES = useMemo(() => [
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'text/plain',
+  ], []);
+  const ALLOWED_EXTENSIONS = useMemo(() => ['.pdf', '.docx', '.txt'], []);
 
   /**
    * Show toast notification
@@ -100,14 +118,38 @@ function EnhancedFileUpload() {
   /**
    * Fetch upload history
    */
+  const buildPreviewUrl = useCallback((path) => {
+    if (!path) return null;
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return path;
+    }
+    const normalized = path.startsWith('/') ? path : `/${path}`;
+    return `${API_BASE}${normalized}`;
+  }, [API_BASE]);
+
+  const normalizeFileRecord = useCallback((record) => {
+    if (!record || typeof record !== 'object') {
+      return record;
+    }
+
+    const previewUrl = buildPreviewUrl(record.previewUrl || record.url);
+
+    return {
+      ...record,
+      previewUrl,
+      url: previewUrl,
+    };
+  }, [buildPreviewUrl]);
+
   const fetchHistory = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE}/files`);
-      setUploadHistory(res.data.files || []);
+      const files = Array.isArray(res.data?.files) ? res.data.files : [];
+      setUploadHistory(files.map(normalizeFileRecord));
     } catch (e) {
       console.error("Failed to fetch upload history:", e);
     }
-  }, [API_BASE]);
+  }, [API_BASE, normalizeFileRecord]);
 
   useEffect(() => {
     fetchHistory();
@@ -367,7 +409,7 @@ function EnhancedFileUpload() {
                     </div>
                   </div>
                   <button
-                    onClick={() => setPreviewFile(file)}
+                    onClick={() => setPreviewFile(normalizeFileRecord(file))}
                     className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                     title="Preview file"
                   >

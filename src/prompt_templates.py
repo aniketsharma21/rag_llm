@@ -30,16 +30,17 @@ class EnhancedPromptTemplates:
     """
     
     # Base RAG prompt with improved context handling
-    BASE_RAG_TEMPLATE = """You are an AI assistant that answers questions based on the provided context documents. 
-Use the following pieces of context to answer the question at the end. If you don't know the answer based on the context, just say that you don't know, don't try to make up an answer.
+    BASE_RAG_TEMPLATE = """You are an AI assistant that answers questions using the supplied source extracts.
+Use the context to answer the question. If the answer is not supported, explicitly state that it is unknown.
 
-When answering:
-1. Be precise and factual
-2. Cite specific sources when possible
-3. If the context contains conflicting information, acknowledge it
-4. Provide confidence levels when appropriate
+When responding:
+1. Begin with a short **Summary** (1–2 sentences) focused solely on the question’s topic.
+2. Follow with grouped bullet lists of key points, keeping each bullet concise and directly relevant to the question.
+3. Explicitly discard any context that does not help answer the question (e.g., biographical details when asked about a concept).
+4. Reference source names inline only when needed for clarity (e.g., [Source: <name>]) and only for facts used in the answer.
+5. Do **not** include a dedicated section titled “Sources” or lists of source names in the answer; the interface already surfaces supporting documents.
 
-Context Documents:
+Context Digest:
 {context}
 
 Question: {question}
@@ -47,24 +48,18 @@ Question: {question}
 Answer: """
 
     # Enhanced template with source attribution
-    SOURCE_ATTRIBUTION_TEMPLATE = """You are an AI assistant that provides detailed answers with proper source attribution.
+    SOURCE_ATTRIBUTION_TEMPLATE = """You are an AI assistant that provides detailed answers with clear, readable source attribution.
 
-Based on the provided context documents, answer the question below. For each piece of information you use:
-- Cite the source document
-- Include page numbers or section references when available
-- Rate your confidence in the information (High/Medium/Low)
+Use the context to answer the question and follow these rules:
+- Start with a concise **Summary** that addresses the question directly.
+- Present key details in short bullet lists grouped by theme; exclude any information that does not advance the answer.
+- When citing evidence, reference the source name inline only when it materially improves clarity and avoid reiterating full source lists.
+- Do **not** append a separate section titled “Sources” or restate file names; the client application will render supporting documents.
 
-Context Documents:
+Context Digest:
 {context}
 
 Question: {question}
-
-Please structure your answer as follows:
-1. **Main Answer**: [Your comprehensive answer]
-2. **Sources Used**: 
-   - Source 1: [Document name/section] - Confidence: [High/Medium/Low]
-   - Source 2: [Document name/section] - Confidence: [High/Medium/Low]
-3. **Additional Notes**: [Any caveats, limitations, or related information]
 
 Answer: """
 
@@ -89,24 +84,19 @@ Provide a natural, conversational response that:
 Answer: """
 
     # Multi-document synthesis template
-    SYNTHESIS_TEMPLATE = """You are an AI assistant that synthesizes information from multiple documents.
+    SYNTHESIS_TEMPLATE = """You are an AI assistant that synthesizes information from multiple sources.
 
-You have been provided with context from {num_sources} different sources. Your task is to:
-1. Identify common themes and patterns across sources
-2. Highlight any contradictions or disagreements
-3. Provide a comprehensive synthesis of the information
-4. Note which sources support which points
+Context from {num_sources} sources is provided. Produce a reader-friendly response that:
+1. Opens with a **Summary** paragraph (1–2 sentences) tightly focused on the question’s subject.
+2. Organises insights into themed sections with bullet lists, including only statements that materially answer the question.
+   - Group shared findings together and mention supporting source names in brackets when essential.
+   - Call out unique insights or disagreements briefly.
+3. Avoid adding any section titled “Sources” or restating document lists; the application surfaces supporting documents automatically.
 
-Context from multiple sources:
+Context Overview:
 {context}
 
 Question: {question}
-
-Please provide a synthesized answer that draws from all relevant sources and clearly indicates:
-- Points supported by multiple sources
-- Unique information from individual sources  
-- Any contradictions or uncertainties
-- Your overall assessment based on the available evidence
 
 Answer: """
 
@@ -288,25 +278,30 @@ class PromptManager:
         for i, doc in enumerate(documents):
             # Format document content
             doc_number = i + 1
-            superscript_number = "".join(SUPERSCRIPT_MAP.get(ch, ch) for ch in str(doc_number))
-            doc_content = f"Document {superscript_number}:\n"
-            
-            if include_metadata and hasattr(doc, 'metadata') and doc.metadata:
-                # Add metadata information
-                metadata = doc.metadata
-                if 'source_display_name' in metadata:
-                    doc_content += f"Source: {metadata['source_display_name']}\n"
-                elif 'source' in metadata:
-                    doc_content += f"Source: {metadata['source']}\n"
-                if 'page_number' in metadata and metadata['page_number']:
-                    doc_content += f"Page: {metadata['page_number']}\n"
-                elif 'page' in metadata:
-                    doc_content += f"Page: {metadata['page']}\n"
-                if 'section' in metadata:
-                    doc_content += f"Section: {metadata['section']}\n"
-                doc_content += "\n"
-            
-            doc_content += f"Content: {doc.page_content}\n\n"
+            metadata = dict(getattr(doc, 'metadata', {}) or {})
+            display_name = metadata.get('source_display_name') or metadata.get('source') or f"Document {doc_number}"
+
+            content_lines = [f"### Source: {display_name}"]
+
+            if include_metadata:
+                page_label = metadata.get('page_label')
+                if not page_label and isinstance(metadata.get('page_number'), int):
+                    page_label = f"Page {metadata['page_number']}"
+                if page_label:
+                    content_lines.append(f"Location: {page_label}")
+
+                if metadata.get('section'):
+                    content_lines.append(f"Section: {metadata['section']}")
+
+            snippet = metadata.get('snippet')
+            if snippet:
+                content_lines.append(f"Summary: {snippet}")
+
+            content_lines.append("Content:")
+            content_lines.append(doc.page_content)
+            content_lines.append("")
+
+            doc_content = "\n".join(content_lines) + "\n"
             
             # Check length limit
             if current_length + len(doc_content) > max_length:

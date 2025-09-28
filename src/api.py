@@ -9,6 +9,7 @@ import json
 import asyncio
 import tempfile
 import time
+import re
 from operator import itemgetter
 from typing import List, Optional, Dict, Any
 import pickle
@@ -177,19 +178,70 @@ def _apply_superscript_citations(answer: str, sources: List[Dict[str, Any]]) -> 
     if "\nSources:" in formatted_answer:
         formatted_answer = formatted_answer.split("\nSources:", 1)[0].rstrip()
 
-    citation_lines = []
+    entries = []
     for source in sources:
-        citation = source.get("citation") or _format_superscript(source.get("id", 0))
-        display_name = source.get("name") or source.get("display_name") or "Document"
-        page_number = source.get("page") or source.get("page_number")
-        page_text = f" (Page {page_number})" if page_number else ""
-        citation_lines.append(f"{citation} {display_name}{page_text}")
+        display_name = (
+            source.get("source_display_name")
+            or source.get("display_name")
+            or source.get("name")
+            or source.get("source_file")
+            or "Source"
+        )
 
-    if citation_lines:
-        citations_block = "\n".join(citation_lines)
-        formatted_answer = f"{formatted_answer}\n\nSources:\n{citations_block}"
+        page_label = source.get("page_label")
+        if not page_label:
+            page_number = source.get("page") or source.get("page_number")
+            if isinstance(page_number, int):
+                page_label = f"Page {page_number}"
+
+        entry = f"- {display_name}"
+        if page_label:
+            entry += f" — {page_label}"
+
+        metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
+        section = metadata.get("section")
+        if section:
+            entry += f" (Section: {section})"
+
+        entries.append(entry)
+
+    if entries:
+        formatted_answer = f"{formatted_answer}\n\nSources:\n" + "\n".join(entries)
 
     return formatted_answer
+
+
+def _clean_answer_text(answer: str) -> str:
+    if not answer:
+        return ""
+
+    cleaned = answer.strip()
+    cleaned = re.sub(r"\n+Sources?:.*$", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
+
+
+def _get_files_inventory() -> List[Dict[str, Any]]:
+    from src.config import RAW_DATA_DIR
+    inventory = []
+    if not os.path.exists(RAW_DATA_DIR):
+        return inventory
+
+    for entry in os.listdir(RAW_DATA_DIR):
+        absolute_path = os.path.join(RAW_DATA_DIR, entry)
+        if not os.path.isfile(absolute_path):
+            continue
+
+        stats = os.stat(absolute_path)
+        inventory.append({
+            "name": entry,
+            "size": stats.st_size,
+            "uploadDate": datetime.fromtimestamp(stats.st_mtime).isoformat(),
+            "previewUrl": f"/files/preview/{quote(entry)}",
+        })
+
+    inventory.sort(key=lambda item: item["uploadDate"], reverse=True)
+    return inventory
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -638,6 +690,16 @@ async def get_job_status(job_id: str):
     )
 
 
+@app.get("/files")
+async def list_uploaded_files():
+    try:
+        files = await run_in_threadpool(_get_files_inventory)
+        return {"files": files}
+    except Exception as exc:
+        logger.error("Failed to list uploaded files", error=str(exc))
+        raise HTTPException(status_code=500, detail="Unable to list uploaded files")
+
+
 async def _process_websocket_query(
     websocket: WebSocket,
     question: str,
@@ -667,24 +729,35 @@ async def _process_websocket_query(
                 for idx, source in enumerate(raw_sources)
             ]
 
+            raw_answer = result.get("answer", "") or ""
             formatted_answer = _apply_superscript_citations(
-                result.get("answer", ""),
+                raw_answer,
                 formatted_sources,
             )
+            formatted_answer = _clean_answer_text(formatted_answer)
 
-            chunk_size = 10
-            for i in range(0, len(formatted_answer), chunk_size):
-                chunk = formatted_answer[i:i + chunk_size]
-                if not chunk:
-                    continue
+            paragraphs = [p.strip() for p in formatted_answer.split("\n\n") if p.strip()]
+            if paragraphs:
+                summary = paragraphs[0]
                 await manager.send_personal_message(
                     json.dumps({
                         "type": "chunk",
-                        "content": chunk,
+                        "content": summary,
+                        "role": "summary",
                     }),
                     websocket,
                 )
                 await asyncio.sleep(0.05)
+
+                for paragraph in paragraphs[1:]:
+                    await manager.send_personal_message(
+                        json.dumps({
+                            "type": "chunk",
+                            "content": paragraph,
+                        }),
+                        websocket,
+                    )
+                    await asyncio.sleep(0.05)
 
             await manager.send_personal_message(
                 json.dumps({
@@ -766,13 +839,6 @@ async def _process_websocket_query(
         async for chunk in rag_chain.astream(input_obj):
             if chunk and isinstance(chunk, str):
                 full_response += chunk
-                await manager.send_personal_message(
-                    json.dumps({
-                        "type": "chunk",
-                        "content": chunk,
-                    }),
-                    websocket,
-                )
 
         docs = input_obj.get("_retrieved_docs", [])
         formatted_sources = [
@@ -788,6 +854,29 @@ async def _process_websocket_query(
         ]
 
         formatted_response = _apply_superscript_citations(full_response, formatted_sources)
+        formatted_response = _clean_answer_text(formatted_response)
+
+        paragraphs = [p.strip() for p in formatted_response.split("\n\n") if p.strip()]
+        if paragraphs:
+            await manager.send_personal_message(
+                json.dumps({
+                    "type": "chunk",
+                    "content": paragraphs[0],
+                    "role": "summary",
+                }),
+                websocket,
+            )
+            await asyncio.sleep(0.05)
+
+            for paragraph in paragraphs[1:]:
+                await manager.send_personal_message(
+                    json.dumps({
+                        "type": "chunk",
+                        "content": paragraph,
+                    }),
+                    websocket,
+                )
+                await asyncio.sleep(0.05)
 
         await manager.send_personal_message(
             json.dumps({

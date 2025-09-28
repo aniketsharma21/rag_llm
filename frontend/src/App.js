@@ -40,6 +40,7 @@ const AppContent = () => {
   const jobPollersRef = useRef({});
   const pendingMessagesRef = useRef([]);
   const isUnmountedRef = useRef(false);
+  const currentResponseIdRef = useRef(null);
 
   const appendSystemMessage = useCallback((text) => {
     setMessages(prev => [
@@ -239,6 +240,7 @@ const AppContent = () => {
           setIsLoading(true);
         } else if (receivedMessage.status === 'stopped') {
           setIsLoading(false);
+          currentResponseIdRef.current = null;
           appendSystemMessage('Generation stopped.');
         } else if (receivedMessage.status === 'connected') {
           setConnectionStatus('connected');
@@ -249,27 +251,50 @@ const AppContent = () => {
       }
 
       if (receivedMessage.type === 'chunk') {
+        const content = receivedMessage.content || '';
+        if (!content) {
+          return;
+        }
+        const isSummary = receivedMessage.role === 'summary';
+
         setMessages(prev => {
           const updated = [...prev];
-          const lastMsg = updated[updated.length - 1];
-          if (lastMsg && lastMsg.sender === 'bot') {
-            updated[updated.length - 1] = {
-              ...lastMsg,
-              text: (lastMsg.text || '') + (receivedMessage.content || ''),
-              timestamp: lastMsg.timestamp || new Date().toISOString(),
-            };
+          let responseId = currentResponseIdRef.current;
+
+          if (isSummary || !responseId) {
+            const newId = `bot-${Date.now()}`;
+            currentResponseIdRef.current = newId;
+            updated.push({
+              id: newId,
+              sender: 'bot',
+              text: content,
+              sources: [],
+              timestamp: new Date().toISOString(),
+            });
             return updated;
           }
-          return [
-            ...updated,
-            {
-              text: receivedMessage.content || '',
+
+          const idx = updated.findIndex(msg => msg.id === responseId);
+          if (idx === -1) {
+            const fallbackId = `bot-${Date.now()}`;
+            currentResponseIdRef.current = fallbackId;
+            updated.push({
+              id: fallbackId,
               sender: 'bot',
+              text: content,
               sources: [],
-              id: Date.now(),
               timestamp: new Date().toISOString(),
-            },
-          ];
+            });
+            return updated;
+          }
+
+          const existing = updated[idx];
+          const separator = existing.text ? '\n\n' : '';
+          updated[idx] = {
+            ...existing,
+            text: `${existing.text || ''}${separator}${content}`,
+          };
+          return updated;
         });
         return;
       }
@@ -277,29 +302,45 @@ const AppContent = () => {
       if (receivedMessage.type === 'complete') {
         setMessages(prev => {
           const updated = [...prev];
+          const responseId = currentResponseIdRef.current;
+          const finalContent = receivedMessage.content || '';
+
+          if (responseId) {
+            const idx = updated.findIndex(msg => msg.id === responseId);
+            if (idx !== -1) {
+              const existing = updated[idx];
+              updated[idx] = {
+                ...existing,
+                text: finalContent || existing.text || '',
+                sources: receivedMessage.sources || existing.sources || [],
+              };
+              return updated;
+            }
+          }
+
           const lastMsg = updated[updated.length - 1];
-          const finalContent = receivedMessage.content || lastMsg?.text || '';
           if (lastMsg && lastMsg.sender === 'bot') {
             updated[updated.length - 1] = {
               ...lastMsg,
-              text: finalContent,
-              sources: receivedMessage.sources || [],
-              id: Date.now(),
+              text: finalContent || lastMsg.text || '',
+              sources: receivedMessage.sources || lastMsg.sources || [],
             };
             return updated;
           }
+
           return [
             ...updated,
             {
               text: finalContent,
               sender: 'bot',
               sources: receivedMessage.sources || [],
-              id: Date.now(),
+              id: `bot-${Date.now()}`,
               timestamp: new Date().toISOString(),
             },
           ];
         });
         setIsLoading(false);
+        currentResponseIdRef.current = null;
         return;
       }
 
@@ -331,6 +372,7 @@ const AppContent = () => {
       ws.current = null;
       setConnectionStatus('disconnected');
       stopAllJobPollers();
+      currentResponseIdRef.current = null;
 
       reconnectAttemptsRef.current += 1;
       const delay = Math.min(1000 * 2 ** Math.max(reconnectAttemptsRef.current - 1, 0), MAX_RECONNECT_DELAY);
@@ -409,6 +451,8 @@ const AppContent = () => {
       ...prev,
       { text: trimmedMessage, sender: 'user', timestamp: new Date().toISOString() },
     ]);
+
+    currentResponseIdRef.current = null;
 
     const payload = {
       type: 'query',
@@ -506,6 +550,7 @@ const AppContent = () => {
       ws.current.send(JSON.stringify({ type: 'stop_generation' }));
     }
     setIsLoading(false);
+    currentResponseIdRef.current = null;
   }, []);
 
   /**

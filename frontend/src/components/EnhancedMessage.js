@@ -9,7 +9,7 @@ const EnhancedMessage = ({ id, sender, text, sources, onFeedback, timestamp }) =
   const [feedbackGiven, setFeedbackGiven] = useState(null);
   const [showActions, setShowActions] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
-  const [expandedCards, setExpandedCards] = useState(() => (sources || []).length > 0 ? [0] : []);
+  const [expandedCards, setExpandedCards] = useState([]);
   const [activePreview, setActivePreview] = useState(null);
 
   const safeSources = useMemo(() => sources || [], [sources]);
@@ -247,6 +247,11 @@ const EnhancedMessage = ({ id, sender, text, sources, onFeedback, timestamp }) =
                           {source.source_display_path && (
                             <p className="text-xs text-gray-400 dark:text-gray-500 truncate">
                               {source.source_display_path}
+                            </p>
+                          )}
+                          {!isExpanded && snippet && (
+                            <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
+                              {snippet}
                             </p>
                           )}
                         </div>

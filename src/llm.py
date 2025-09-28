@@ -205,72 +205,129 @@ class EnhancedRAGChain:
             raise LLMError(f"RAG query failed: {str(e)}", {"question": question, "error": str(e)})
     
     def _extract_source_info(self, documents: List[Document], answer: str) -> List[Dict[str, Any]]:
-        """Extract and format source information with confidence scores."""
-        sources = []
-        
-        for i, doc in enumerate(documents):
-            metadata = dict(getattr(doc, 'metadata', {}) or {})
+        """Aggregate chunk metadata into document-level source entries."""
+        grouped_sources: Dict[str, Dict[str, Any]] = {}
+        insertion_order: List[str] = []
 
-            snippet = metadata.get('snippet') or (doc.page_content or '')
-            if snippet:
-                snippet = snippet.strip()
-                if len(snippet) > 320:
-                    truncated = snippet[:320].rsplit(' ', 1)[0]
-                    snippet = f"{truncated}…" if truncated else snippet[:320] + "…"
+        for doc in documents:
+            metadata = dict(getattr(doc, "metadata", {}) or {})
+            raw_path = metadata.get("raw_file_path") or metadata.get("source")
+            display_name = metadata.get("source_display_name")
+            if not display_name and raw_path:
+                display_name = os.path.basename(raw_path)
 
-            raw_path = metadata.get('raw_file_path') or metadata.get('source')
-            preview_url = metadata.get('preview_url')
+            source_key = metadata.get("document_id") or raw_path or display_name or str(id(doc))
+
+            preview_url = metadata.get("preview_url")
             if not preview_url and raw_path:
                 filename = os.path.basename(raw_path)
                 if filename:
                     preview_url = f"/files/preview/{quote(filename)}"
 
-            display_name = metadata.get('source_display_name')
-            if not display_name and raw_path:
-                display_name = os.path.basename(raw_path)
+            page_number = metadata.get("page_number")
+            if page_number is None and isinstance(metadata.get("page"), int):
+                page_number = metadata["page"] + 1
 
-            page_number = metadata.get('page_number')
-            if page_number is None and isinstance(metadata.get('page'), int):
-                page_number = metadata['page'] + 1
+            snippet = metadata.get("snippet") or (doc.page_content or "")
+            if snippet:
+                snippet = snippet.strip()
+                if len(snippet) > 320:
+                    truncated = snippet[:320].rsplit(" ", 1)[0]
+                    snippet = f"{truncated}…" if truncated else snippet[:320] + "…"
 
-            page_label = metadata.get('page_label')
-            if not page_label and page_number is not None:
-                page_label = f"Page {page_number}"
+            relevance = self._calculate_relevance_score(doc, answer)
+
+            entry = grouped_sources.get(source_key)
+            if not entry:
+                entry = {
+                    "raw_file_path": raw_path,
+                    "source_display_name": display_name or "Document",
+                    "source_display_path": metadata.get("source_display_path"),
+                    "preview_url": preview_url,
+                    "relevance_score": relevance,
+                    "snippet": snippet,
+                    "snippet_score": relevance if snippet else -1,
+                    "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
+                    "metadata": dict(metadata),
+                    "page_numbers": set([page_number]) if page_number is not None else set(),
+                    "chunk_count": 1,
+                    "bm25_score": metadata.get("bm25_score"),
+                    "retrieval_rank": metadata.get("retrieval_rank"),
+                }
+                grouped_sources[source_key] = entry
+                insertion_order.append(source_key)
+            else:
+                entry["chunk_count"] += 1
+                entry["relevance_score"] = max(entry["relevance_score"], relevance)
+                if preview_url and not entry.get("preview_url"):
+                    entry["preview_url"] = preview_url
+                if page_number is not None:
+                    entry["page_numbers"].add(page_number)
+                if snippet and (entry["snippet"] is None or relevance > entry.get("snippet_score", -1)):
+                    entry["snippet"] = snippet
+                    entry["snippet_score"] = relevance
+                    entry["content"] = doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
+                if metadata.get("bm25_score") is not None:
+                    if entry["bm25_score"] is None or metadata["bm25_score"] > entry["bm25_score"]:
+                        entry["bm25_score"] = metadata["bm25_score"]
+                if metadata.get("retrieval_rank") is not None:
+                    if entry["retrieval_rank"] is None or metadata["retrieval_rank"] < entry["retrieval_rank"]:
+                        entry["retrieval_rank"] = metadata["retrieval_rank"]
+
+        aggregated_sources: List[Dict[str, Any]] = []
+        for index, key in enumerate(insertion_order, start=1):
+            entry = grouped_sources[key]
+            page_numbers = sorted(n for n in entry["page_numbers"] if n is not None)
+            if page_numbers:
+                if len(page_numbers) == 1:
+                    page_label = f"Page {page_numbers[0]}"
+                else:
+                    if len(page_numbers) <= 5:
+                        page_label = "Pages " + ", ".join(str(n) for n in page_numbers)
+                    else:
+                        page_label = f"Pages {page_numbers[0]}–{page_numbers[-1]}"
+            else:
+                page_label = None
+
+            metadata = dict(entry.get("metadata") or {})
+            metadata.update({
+                "snippet": entry.get("snippet"),
+                "preview_url": entry.get("preview_url"),
+                "page_numbers": page_numbers,
+                "page_label": page_label,
+                "chunk_count": entry.get("chunk_count", 0),
+                "source_display_name": entry.get("source_display_name"),
+                "raw_file_path": entry.get("raw_file_path"),
+            })
 
             source_info = {
-                "id": i + 1,
-                "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
-                "snippet": snippet,
+                "id": index,
+                "content": entry.get("content", ""),
+                "snippet": entry.get("snippet"),
                 "metadata": metadata,
-                "relevance_score": self._calculate_relevance_score(doc, answer),
-                "source_file": raw_path,
-                "raw_file_path": raw_path,
-                "source_display_path": metadata.get('source_display_path'),
-                "source_display_name": display_name or f"Document {i + 1}",
-                "page": page_number,
-                "page_number": page_number,
+                "relevance_score": entry.get("relevance_score", 0.0),
+                "source_file": entry.get("raw_file_path"),
+                "raw_file_path": entry.get("raw_file_path"),
+                "source_display_path": entry.get("source_display_path"),
+                "source_display_name": entry.get("source_display_name"),
+                "page": page_numbers[0] if page_numbers else None,
+                "page_number": page_numbers[0] if page_numbers else None,
+                "page_numbers": page_numbers,
                 "page_label": page_label,
-                "preview_url": preview_url,
+                "preview_url": entry.get("preview_url"),
+                "chunk_count": entry.get("chunk_count"),
+                "citation": self._format_superscript(index),
             }
 
-            if 'bm25_score' in metadata:
-                source_info['bm25_score'] = metadata['bm25_score']
-            if 'retrieval_rank' in metadata:
-                source_info['retrieval_rank'] = metadata['retrieval_rank']
+            if entry.get("bm25_score") is not None:
+                source_info["bm25_score"] = entry["bm25_score"]
+            if entry.get("retrieval_rank") is not None:
+                source_info["retrieval_rank"] = entry["retrieval_rank"]
 
-            source_info['citation'] = self._format_superscript(i + 1)
-            metadata.update({
-                'snippet': snippet,
-                'preview_url': preview_url,
-                'page_number': page_number,
-                'page_label': page_label,
-                'source_display_name': source_info['source_display_name'],
-            })
-            sources.append(source_info)
-        
-        # Sort by relevance score
-        sources.sort(key=lambda x: x['relevance_score'], reverse=True)
-        return sources
+            aggregated_sources.append(source_info)
+
+        aggregated_sources.sort(key=lambda x: x.get("relevance_score", 0.0), reverse=True)
+        return aggregated_sources
 
     def _format_superscript(self, number: int) -> str:
         return "".join(SUPERSCRIPT_MAP.get(ch, ch) for ch in str(number))
@@ -287,24 +344,7 @@ class EnhancedRAGChain:
         return updated
 
     def _apply_superscript_citations(self, answer: str, sources: List[Dict[str, Any]]) -> str:
-        if not sources:
-            return answer
-
-        formatted_answer = self._replace_bracket_citations(answer).rstrip()
-
-        citation_lines = []
-        for source in sources:
-            citation = source.get('citation') or self._format_superscript(source.get('id', 0))
-            display_name = source.get('source_display_name') or source.get('source_file') or 'Document'
-            page_number = source.get('page') or source.get('page_number')
-            page_text = f" (Page {page_number})" if page_number else ""
-            citation_lines.append(f"{citation} {display_name}{page_text}")
-
-        citations_block = "\n".join(citation_lines)
-
-        if citations_block:
-            formatted_answer = f"{formatted_answer}\n\nSources:\n{citations_block}"
-
+        formatted_answer = self._replace_bracket_citations(answer or "").strip()
         return formatted_answer
     
     def _calculate_relevance_score(self, document: Document, answer: str) -> float:
