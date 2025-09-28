@@ -15,6 +15,7 @@ import pickle
 import uuid
 from datetime import datetime
 import contextlib
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, status, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -90,6 +91,17 @@ def _normalize_source_payload(
 
     content = source.get("content") or metadata.get("content")
 
+    snippet = (
+        source.get("snippet")
+        or metadata.get("snippet")
+        or (content.strip() if isinstance(content, str) else None)
+    )
+    if snippet:
+        snippet = snippet.strip()
+        if len(snippet) > 320:
+            truncated = snippet[:320].rsplit(" ", 1)[0]
+            snippet = f"{truncated}…" if truncated else snippet[:320] + "…"
+
     citation = source.get("citation") or _format_superscript(source.get("id", index))
 
     page_number = source.get("page_number") or source.get("page")
@@ -99,8 +111,18 @@ def _normalize_source_payload(
         elif isinstance(metadata.get("page"), int):
             page_number = metadata.get("page") + 1
 
-    url = None
-    if raw_path:
+    preview_url = source.get("preview_url") or metadata.get("preview_url")
+    if not preview_url and raw_path:
+        filename = os.path.basename(raw_path)
+        if filename:
+            preview_url = f"/files/preview/{quote(filename)}"
+
+    page_label = source.get("page_label") or metadata.get("page_label")
+    if not page_label and page_number is not None:
+        page_label = f"Page {page_number}"
+
+    url = preview_url
+    if not url and raw_path:
         url = f"file://{raw_path}"
         if isinstance(page_number, int):
             url = f"{url}#page={page_number}"
@@ -110,6 +132,10 @@ def _normalize_source_payload(
         "raw_file_path": raw_path,
         "source_display_path": source_display_path,
         "source_display_name": display_name,
+        "snippet": snippet,
+        "page_number": page_number,
+        "page_label": page_label,
+        "preview_url": preview_url,
     })
 
     payload: Dict[str, Any] = {
@@ -118,14 +144,17 @@ def _normalize_source_payload(
         "name": display_name,
         "display_name": display_name,
         "content": content,
+        "snippet": snippet,
         "source_file": raw_path,
         "raw_file_path": raw_path,
         "source_display_path": source_display_path,
         "page": page_number,
         "page_number": page_number,
+        "page_label": page_label,
         "relevance_score": source.get("relevance_score") or metadata.get("relevance_score"),
         "confidence": source.get("confidence") or default_confidence,
         "metadata": metadata,
+        "preview_url": preview_url,
         "url": url,
     }
 

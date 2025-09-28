@@ -17,6 +17,7 @@ Usage:
 """
 
 import os
+from urllib.parse import quote
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from langchain_groq import ChatGroq
 from langchain.schema import Document
@@ -209,36 +210,62 @@ class EnhancedRAGChain:
         
         for i, doc in enumerate(documents):
             metadata = dict(getattr(doc, 'metadata', {}) or {})
+
+            snippet = metadata.get('snippet') or (doc.page_content or '')
+            if snippet:
+                snippet = snippet.strip()
+                if len(snippet) > 320:
+                    truncated = snippet[:320].rsplit(' ', 1)[0]
+                    snippet = f"{truncated}…" if truncated else snippet[:320] + "…"
+
+            raw_path = metadata.get('raw_file_path') or metadata.get('source')
+            preview_url = metadata.get('preview_url')
+            if not preview_url and raw_path:
+                filename = os.path.basename(raw_path)
+                if filename:
+                    preview_url = f"/files/preview/{quote(filename)}"
+
+            display_name = metadata.get('source_display_name')
+            if not display_name and raw_path:
+                display_name = os.path.basename(raw_path)
+
+            page_number = metadata.get('page_number')
+            if page_number is None and isinstance(metadata.get('page'), int):
+                page_number = metadata['page'] + 1
+
+            page_label = metadata.get('page_label')
+            if not page_label and page_number is not None:
+                page_label = f"Page {page_number}"
+
             source_info = {
                 "id": i + 1,
                 "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
+                "snippet": snippet,
                 "metadata": metadata,
-                "relevance_score": self._calculate_relevance_score(doc, answer)
+                "relevance_score": self._calculate_relevance_score(doc, answer),
+                "source_file": raw_path,
+                "raw_file_path": raw_path,
+                "source_display_path": metadata.get('source_display_path'),
+                "source_display_name": display_name or f"Document {i + 1}",
+                "page": page_number,
+                "page_number": page_number,
+                "page_label": page_label,
+                "preview_url": preview_url,
             }
-            
-            # Add source-specific metadata
-            if hasattr(doc, 'metadata') and doc.metadata:
-                raw_path = metadata.get('raw_file_path') or metadata.get('source')
-                source_info['source_file'] = raw_path
-                source_info['raw_file_path'] = raw_path
-                source_info['source_display_path'] = metadata.get('source_display_path')
-                display_name = metadata.get('source_display_name')
-                if not display_name and raw_path:
-                    display_name = os.path.basename(raw_path)
-                source_info['source_display_name'] = display_name or f"Document {i + 1}"
 
-                page_number = metadata.get('page_number')
-                if page_number is None and isinstance(metadata.get('page'), int):
-                    page_number = metadata['page'] + 1
-                source_info['page'] = page_number
-                source_info['page_number'] = page_number
+            if 'bm25_score' in metadata:
+                source_info['bm25_score'] = metadata['bm25_score']
+            if 'retrieval_rank' in metadata:
+                source_info['retrieval_rank'] = metadata['retrieval_rank']
 
-                if 'bm25_score' in metadata:
-                    source_info['bm25_score'] = metadata['bm25_score']
-                if 'retrieval_rank' in metadata:
-                    source_info['retrieval_rank'] = metadata['retrieval_rank']
-            
             source_info['citation'] = self._format_superscript(i + 1)
+            metadata.update({
+                'snippet': snippet,
+                'preview_url': preview_url,
+                'page_number': page_number,
+                'page_label': page_label,
+                'source_display_name': source_info['source_display_name'],
+            })
             sources.append(source_info)
         
         # Sort by relevance score

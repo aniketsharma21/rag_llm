@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 
 /**
@@ -9,6 +9,80 @@ const EnhancedMessage = ({ id, sender, text, sources, onFeedback, timestamp }) =
   const [feedbackGiven, setFeedbackGiven] = useState(null);
   const [showActions, setShowActions] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [expandedCards, setExpandedCards] = useState(() => (sources || []).length > 0 ? [0] : []);
+  const [activePreview, setActivePreview] = useState(null);
+
+  const safeSources = useMemo(() => sources || [], [sources]);
+  const apiBaseUrl = useMemo(() => {
+    const envUrl = process.env.REACT_APP_API_URL;
+    if (envUrl && envUrl.trim()) {
+      return envUrl.replace(/\/$/, '');
+    }
+    return 'http://localhost:8000';
+  }, []);
+
+  const buildAbsoluteUrl = (path) => {
+    if (!path || typeof path !== 'string') {
+      return null;
+    }
+    if (/^https?:\/\//i.test(path)) {
+      return path;
+    }
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    return `${apiBaseUrl}${normalizedPath}`;
+  };
+
+  const extractFilename = (rawPath) => {
+    if (!rawPath || typeof rawPath !== 'string') {
+      return null;
+    }
+    const parts = rawPath.split(/[/\\]/);
+    return parts[parts.length - 1] || null;
+  };
+
+  const resolvePreviewUrl = (source) => {
+    if (!source) {
+      return null;
+    }
+    const previewPath = source.preview_url || source.metadata?.preview_url;
+    if (previewPath) {
+      return buildAbsoluteUrl(previewPath);
+    }
+
+    const rawPath = source.raw_file_path || source.source_file || source.metadata?.raw_file_path;
+    const filename = extractFilename(rawPath);
+    if (filename) {
+      return buildAbsoluteUrl(`/files/preview/${filename}`);
+    }
+
+    return null;
+  };
+
+  const resolveExternalUrl = (source) => {
+    if (!source) {
+      return null;
+    }
+
+    const directUrl = source.url;
+    if (directUrl && /^https?:\/\//i.test(directUrl)) {
+      return directUrl;
+    }
+
+    const previewUrl = resolvePreviewUrl(source);
+    if (previewUrl) {
+      return previewUrl;
+    }
+
+    const rawPath = source.raw_file_path || source.source_file || source.metadata?.raw_file_path;
+    if (rawPath && !/^file:/.test(rawPath)) {
+      const filename = extractFilename(rawPath);
+      if (filename) {
+        return buildAbsoluteUrl(`/files/preview/${filename}`);
+      }
+    }
+
+    return null;
+  };
 
   /**
    * Handle feedback submission
@@ -54,6 +128,28 @@ const EnhancedMessage = ({ id, sender, text, sources, onFeedback, timestamp }) =
     }
   };
 
+  const toggleCard = (index) => {
+    setExpandedCards((prev) =>
+      prev.includes(index)
+        ? prev.filter((i) => i !== index)
+        : [...prev, index]
+    );
+  };
+
+  const handleOpenPreview = (source) => {
+    const previewUrl = resolvePreviewUrl(source);
+    if (!previewUrl) {
+      return;
+    }
+    setActivePreview({
+      url: previewUrl,
+      title: source.display_name || source.name || `Document ${source.id || ''}`,
+      pageLabel: source.page_label || (source.page_number ? `Page ${source.page_number}` : null),
+    });
+  };
+
+  const handleClosePreview = () => setActivePreview(null);
+
   /**
    * Format timestamp for display
    */
@@ -74,6 +170,7 @@ const EnhancedMessage = ({ id, sender, text, sources, onFeedback, timestamp }) =
   };
 
   return (
+    <>
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4 animate-slide-in-up`}>
       <div className="flex flex-col max-w-[85%] md:max-w-2xl" style={{ alignItems: isUser ? 'flex-end' : 'flex-start' }}>
         {/* Timestamp */}
@@ -105,51 +202,120 @@ const EnhancedMessage = ({ id, sender, text, sources, onFeedback, timestamp }) =
         </div>
 
         {/* Enhanced Sources section - displayed separately below the message */}
-        {!isUser && sources && sources.length > 0 && (
+        {!isUser && safeSources.length > 0 && (
           <div className="mt-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center mb-3">
               <svg className="w-4 h-4 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
               <span className="font-medium text-sm text-gray-700 dark:text-gray-300">
-                Sources ({sources.length})
+                Sources ({safeSources.length})
               </span>
             </div>
-            <div className="grid gap-2">
-              {sources.map((source, index) => (
-                <div key={index} className="group">
-                  <a 
-                    href={source.url} 
-                    target="_blank" 
-                    rel="noopener noreferrer" 
-                    className="flex items-center p-2 bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-500 hover:shadow-sm transition-all duration-200"
+            <div className="space-y-3">
+              {safeSources.map((source, index) => {
+                const isExpanded = expandedCards.includes(index);
+                const displayName = source.display_name || source.name || `Document ${index + 1}`;
+                const pageLabel = source.page_label || (source.page_number ? `Page ${source.page_number}` : null);
+                const relevance = typeof source.relevance_score === 'number' ? source.relevance_score : null;
+                const snippet = source.snippet || source.content;
+                const previewUrl = resolvePreviewUrl(source);
+                const externalUrl = resolveExternalUrl(source);
+                return (
+                  <div
+                    key={`${source.id || index}-${displayName}`}
+                    className="bg-white dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm"
                   >
-                    <div className="flex-shrink-0 w-8 h-8 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center mr-3">
-                      <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                        {source.citation || `${index + 1}`}
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                        {source.display_name || source.name || `Document ${index + 1}`}
-                      </p>
-                      {(source.page || source.page_number) && (
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          Page {source.page || source.page_number}
-                        </p>
-                      )}
-                      {source.source_display_path && (
-                        <p className="text-xs text-gray-400 dark:text-gray-500 truncate">
-                          {source.source_display_path}
-                        </p>
-                      )}
-                    </div>
-                    <svg className="w-4 h-4 text-gray-400 group-hover:text-blue-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                    </svg>
-                  </a>
-                </div>
-              ))}
+                    <button
+                      type="button"
+                      onClick={() => toggleCard(index)}
+                      className="w-full flex items-start justify-between px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/70 rounded-t-xl"
+                    >
+                      <div className="flex items-start space-x-3">
+                        <div className="flex-shrink-0 w-8 h-8 bg-blue-100 dark:bg-blue-900/40 rounded-lg flex items-center justify-center text-xs font-semibold text-blue-600 dark:text-blue-300">
+                          {source.citation || `${index + 1}`}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                            {displayName}
+                          </p>
+                          {pageLabel && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {pageLabel}
+                            </p>
+                          )}
+                          {source.source_display_path && (
+                            <p className="text-xs text-gray-400 dark:text-gray-500 truncate">
+                              {source.source_display_path}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <svg
+                        className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    {isExpanded && (
+                      <div className="px-4 pb-4 pt-1 border-t border-gray-200 dark:border-gray-700 rounded-b-xl">
+                        {snippet && (
+                          <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+                            {snippet}
+                          </p>
+                        )}
+                        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                          {pageLabel && (
+                            <span className="inline-flex items-center px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200">
+                              {pageLabel}
+                            </span>
+                          )}
+                          {relevance !== null && (
+                            <span className="inline-flex items-center px-2 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-200">
+                              Relevance: {(relevance * 100).toFixed(0)}%
+                            </span>
+                          )}
+                          {source.confidence && (
+                            <span className="inline-flex items-center px-2 py-1 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-200">
+                              Confidence: {(source.confidence * 100).toFixed(0)}%
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {previewUrl && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPreview(source)}
+                              className="inline-flex items-center px-3 py-2 text-xs font-medium text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-800/60 transition-colors"
+                            >
+                              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618V19a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2h6" />
+                              </svg>
+                              Quick preview
+                            </button>
+                          )}
+                          {externalUrl && (
+                            <a
+                              href={externalUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                            >
+                              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4m-2-8l5 5m0 0l-5 5m5-5H9" />
+                              </svg>
+                              Open source
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -283,6 +449,41 @@ const EnhancedMessage = ({ id, sender, text, sources, onFeedback, timestamp }) =
         )}
       </div>
     </div>
+
+    {activePreview && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+        <div className="relative w-full max-w-4xl bg-white dark:bg-gray-900 rounded-2xl shadow-2xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                {activePreview.title}
+              </h3>
+              {activePreview.pageLabel && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">{activePreview.pageLabel}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleClosePreview}
+              className="p-2 rounded-full text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              aria-label="Close preview"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="h-[60vh] bg-gray-100 dark:bg-gray-800">
+            <iframe
+              src={activePreview.url}
+              title={activePreview.title}
+              className="w-full h-full border-0"
+            />
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 };
 
