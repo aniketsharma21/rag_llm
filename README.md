@@ -5,25 +5,28 @@ A robust, modular, and production-oriented framework for building Retrieval-Augm
 ## 🌟 Features
 
 ### Backend
--   **Document Processing**: Handles 8+ formats (PDF, DOCX, TXT, MD, CSV, JSON, PPTX, XLSX) with smart chunking, checksum validation, and graceful error handling via custom exceptions.
--   **Vector & Hybrid Retrieval**: Builds persistent ChromaDB stores and combines semantic search with BM25 keyword ranking through an ensemble retriever with configurable weights.
--   **LLM Orchestration**: Integrates Groq-hosted models alongside HuggingFace embeddings, advanced prompt templates, conversation memory, and confidence scoring.
--   **API & Infrastructure**: FastAPI layer with REST and WebSocket streaming, structured logging (via `structlog`), database-backed conversation persistence, and resilient fallbacks.
+- **Document Processing**: Handles 8+ formats (PDF, DOCX, TXT, MD, CSV, JSON, PPTX, XLSX) with smart chunking, checksum validation, and graceful error handling via custom exceptions.
+- **Vector & Hybrid Retrieval**: Builds persistent ChromaDB stores and combines semantic search with BM25 keyword ranking through an ensemble retriever with configurable weights.
+- **LLM Orchestration**: Integrates Groq-hosted models alongside HuggingFace embeddings, advanced prompt templates, conversation memory, and confidence scoring.
+- **API & Infrastructure**: FastAPI layer with REST and WebSocket streaming, structured logging (via `structlog`), database-backed conversation persistence, and resilient fallbacks.
+- **Async Ingest Workflow**: `/ingest` returns `job_id`s, `/status/{job_id}` provides progress updates, and post-ingest payloads automatically refresh vector stores.
+- **Document Services**: `/files` lists uploaded sources (with metadata and preview URLs) and `/files/preview/{filename}` streams sanitized PDF previews for inline viewing.
 
 ### Frontend
--   **Modern React Interface**: Responsive React + Tailwind UI with polished animations, mobile-first layouts, and accessibility-focused interactions.
--   **Real-time Chat**: Interactive WebSocket streaming, enhanced message actions (copy, share, timestamps), and improved loading states.
--   **Intuitive Workflows**: Drag & drop uploads, advanced document search in the sidebar, rich source attribution cards, and toast notifications for feedback.
--   **Customizable**: Light/dark themes, configurable model settings, and modular components ready for enterprise branding.
+- **Modern React Interface**: Responsive React + Tailwind UI with polished animations, mobile-first layouts, and accessibility-focused interactions.
+- **Real-time Chat**: Interactive WebSocket streaming with executive-summary-first delivery, enhanced message actions (copy, share, timestamps), and improved loading states.
+- **Intuitive Workflows**: Drag & drop uploads, advanced document search in the sidebar, rich document-level source cards, toast notifications, and inline PDF preview modals.
+- **Customizable**: Light/dark themes, configurable model settings, and modular components ready for enterprise branding.
 
 ## ✨ Recent Enhancements
 
 -   **Hybrid Retrieval Engine** (`src/retrieval.py`): Semantic + BM25 ensemble retriever with conversation-aware context selection.
--   **Advanced Prompting** (`src/prompt_templates.py`): Six specialized templates with automatic selection and context formatting utilities.
+-   **Advanced Prompting** (`src/prompt_templates.py`): Six specialized templates with automatic selection, context pruning, and source-aware formatting.
 -   **Structured Logging & Exceptions** (`src/logging_config.py`, `src/exceptions.py`): JSON logs, contextual metadata, and domain-specific exception hierarchy.
 -   **Persistence Layer** (`src/database.py`): SQLAlchemy models for conversation/document history with CRUD helpers.
--   **UI Upgrades** (`frontend/src/components/`): Enhanced chat experience featuring drag & drop uploads, improved sources display, and responsive design.
--   **API Improvements** (`src/api.py`): Robust validation, conversation management endpoints, and streaming fallbacks.
+-   **Streaming UX** (`src/api.py`, `frontend/src/App.js`): Summaries stream before detail paragraphs, stop-generation is honored immediately, and chat messages merge role-tagged chunks automatically.
+-   **Rich Source Cards** (`frontend/src/components/EnhancedMessage.js`): Document-level aggregation with snippets, page ranges, relevance hints, preview buttons, and accessibility tweaks.
+-   **Upload Workbench** (`frontend/src/components/EnhancedFileUpload.js` + `/files` endpoint): Drag & drop uploads with history, toast feedback, and inline PDF preview modals backed by sanitized download URLs.
 
 ## 🏗️ Project Structure
 
@@ -92,6 +95,9 @@ rag_llm/
     cd ..
     ```
 
+4.  **(Optional) Seed Documents**
+    Place PDFs and other supported files under `data/raw/` or upload from the UI. The backend will create previews under `/files/preview/{filename}` automatically.
+
 ## 🖥️ Usage
 
 1.  **Start the Backend Server**
@@ -110,8 +116,9 @@ rag_llm/
     The web interface will be available at `http://localhost:3000`.
 
 3.  **Upload Documents and Chat**
-    -   Navigate to the "Browse Documents" page to upload your files.
-    -   Return to the "New Chat" page to start asking questions!
+    -   Navigate to the "Upload Documents" page to drag & drop new files, monitor ingest status, and open the preview modal via the eye icon.
+    -   Use the "New Chat" view to ask questions; summaries stream first, followed by grouped detail bullets and document cards.
+    -   Source cards provide quick "Preview" and "Open" options using the backend preview service.
 
 ### Using the Backend CLI (Optional)
 
@@ -132,6 +139,15 @@ To run the backend test suite, use `pytest` from the project root:
 ```bash
 pytest
 ```
+
+## 📡 API Reference
+
+* **`POST /ingest`** — Accepts multipart uploads, responds with `job_id` for async processing.
+* **`GET /status/{job_id}`** — Returns ingest progress, completion state, and diagnostics.
+* **`GET /files`** — Lists uploaded documents with size, timestamps, and preview URLs.
+* **`GET /files/preview/{filename}`** — Streams the sanitized PDF preview used by the frontend modal.
+* **`POST /query`** — REST query interface (non-streaming fallback).
+* **`/ws/chat`** — WebSocket endpoint supporting streaming replies, stop-generation, and feedback events.
 
 ## 🤝 Contributing
 

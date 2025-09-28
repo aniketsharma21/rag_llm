@@ -5,17 +5,17 @@ A modern, responsive web interface for the RAG (Retrieval-Augmented Generation) 
 ## ✨ Features
 
 - **Conversational Workspace**: Immersive chat layout with polished animations, responsive layouts, and accessibility-first patterns.
-- **Real-time Streaming**: WebSocket-driven assistant replies with incremental rendering and graceful loading states.
-- **Rich Message Experience**: Markdown rendering, inline code blocks, copy/share actions, and relative timestamps.
-- **Contextual Sources**: Numbered source cards with hover states, confidence indicators, and responsive presentation.
-- **Document Workbench**: Drag & drop uploads with validation, progress feedback, and toast-based alerts.
+- **Real-time Streaming**: WebSocket-driven assistant replies with executive-summary-first delivery, chunk merging, and graceful loading states.
+- **Rich Message Experience**: Markdown rendering, inline code blocks, copy/share actions, relative timestamps, and document-level source cards.
+- **Document Workbench**: Drag & drop uploads with validation, progress feedback, toast alerts, and inline PDF preview modals powered by `/files/preview/{filename}`.
 - **Conversation Intelligence**: Searchable history in the sidebar, quick filters, and persistent sessions.
 - **Configurable Controls**: Settings panel for model selection and chat preferences, plus theme toggles with local persistence.
 
 ## 🚀 Recent Enhancements
 
 - **Enhanced Components**: Rebuilt header, sidebar, chat input, message bubble, and file upload experiences (`frontend/src/components/Enhanced*.js`).
-- **Advanced Search UX**: Integrated global search bar within the sidebar with focus management and filter hooks.
+- **Streaming UX**: WebSocket handler stitches summary/detail chunks, honors stop-generation, and keeps active response state in `App.js`.
+- **Document Previews**: Upload history lists `/files` metadata and the eye icon opens inline previews via `EnhancedFileUpload.js`.
 - **Mobile-first Polish**: Improved spacing, touch targets, and action visibility for small screens.
 - **Feedback & Notifications**: Expanded toast system, inline status indicators, and consistent loading skeletons.
 
@@ -53,21 +53,19 @@ A modern, responsive web interface for the RAG (Retrieval-Augmented Generation) 
 
 ## 🏗️ Project Structure
 
-The project follows a standard Create React App structure, with components organized by feature.
-
 ```
 frontend/
 ├── public/                # Static assets and index.html
 ├── src/
-│   ├── components/        # Reusable React components
-│   │   ├── App.js         # Main application component and routing
-│   │   ├── Sidebar.js     # Left sidebar with navigation and history
-│   │   ├── Header.js      # Top header with title and actions
-│   │   ├── ChatWindow.js  # Container for chat messages
-│   │   ├── Message.js     # Individual chat bubble component
-│   │   ├── ChatInput.js   # The message input form/footer
-│   │   ├── FileUpload.js  # The document upload page
-│   │   └── SettingsPanel.js # The settings modal
+│   ├── App.js             # App shell, routing, WebSocket orchestration
+│   ├── components/
+│   │   ├── EnhancedSidebar.js      # Navigation, search, conversation history
+│   │   ├── EnhancedHeader.js       # Connection status + actions
+│   │   ├── ChatWindow.js           # Displays chat transcripts
+│   │   ├── EnhancedMessage.js      # Message bubble with source cards & actions
+│   │   ├── EnhancedChatInput.js    # Input box, upload status, stop button
+│   │   ├── EnhancedFileUpload.js   # Drag & drop upload and preview modal
+│   │   └── SettingsPanel.js        # Model and preference configuration
 │   ├── App.css            # Main stylesheet with Tailwind directives
 │   └── index.js           # Application entry point
 ├── tailwind.config.js     # Tailwind CSS configuration

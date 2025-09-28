@@ -9,22 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Frontend React application with chat interface
 - FastAPI backend with WebSocket support
-- Document upload and management UI
-- Real-time chat functionality
-- Source attribution for answers
-- Comprehensive API documentation
+- Document upload and management UI with drag & drop experience
+- Real-time chat functionality with streaming summaries and detail paragraphs
+- Source attribution for answers rendered as interactive document cards
+- `/files` inventory API and `/files/preview/{filename}` PDF preview service
+- Comprehensive API documentation (README refresh)
 - Improved error handling and logging
 - Environment configuration examples
 - Development and production deployment guides
 - Integrated `react-router-dom` for frontend routing (2025-09-22)
+- Async ingest workflow with job status polling and stop-generation support
 
 ### Changed
 - Updated project structure for better organization
-- Enhanced documentation and README
+- Enhanced documentation and README (2025-09-28)
 - Improved error messages and validation
 - Optimized build process
 - Updated dependencies to latest stable versions
-- Enhanced UI and UX in the React frontend: improved sidebar, navigation, and chat/document management (2025-09-22)
+- Enhanced UI and UX in the React frontend: improved sidebar, navigation, chat/document management, and inline PDF previews (2025-09-22)
+- Aggregated sources at document-level with cleaner assistant responses
 
 ## [0.1.0] - 2025-09-15
 ### Added
