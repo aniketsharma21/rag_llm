@@ -4,6 +4,9 @@ from __future__ import annotations
 import asyncio
 import os
 import pickle
+import time
+from collections import OrderedDict
+from threading import Lock
 from typing import Any, Dict, List, Optional, Callable, Awaitable, Tuple
 
 import yaml
@@ -33,11 +36,18 @@ logger = get_logger(__name__)
 class RAGService:
     """Provides higher-level operations for answering queries."""
 
+    _MAX_CHUNK_FILES = 48
+
     def __init__(self) -> None:
         self._enhanced_chain: Optional[EnhancedRAGChain] = None
+        self._chunk_cache: OrderedDict[str, List[Any]] = OrderedDict()
+        self._chain_lock: Lock = Lock()
+        self._cache_lock: Lock = Lock()
 
     def reset_chain(self) -> None:
         self._enhanced_chain = None
+        with self._cache_lock:
+            self._chunk_cache.clear()
 
     async def create_conversation(self, title: str, user_id: str = "default_user") -> Dict[str, Any]:
         normalized_title = title.strip()
@@ -93,43 +103,104 @@ class RAGService:
             repo = ConversationRepository(session)
             return await repo.delete(conversation_id)
 
+    def _load_documents(self) -> List[Any]:
+        documents: List[Any] = []
+        if not os.path.exists(PROCESSED_DATA_DIR):
+            return documents
+
+        for filename in os.listdir(PROCESSED_DATA_DIR):
+            if not filename.endswith("_chunks.pkl"):
+                continue
+            chunk_path = os.path.join(PROCESSED_DATA_DIR, filename)
+            cached: Optional[List[Any]] = None
+            with self._cache_lock:
+                cached = self._chunk_cache.get(chunk_path)
+                if cached is not None:
+                    self._chunk_cache.move_to_end(chunk_path)
+
+            if cached is None:
+                try:
+                    with open(chunk_path, "rb") as handle:
+                        loaded_chunks = pickle.load(handle)
+                except Exception as exc:  # pylint: disable=broad-except
+                    logger.warning(
+                        "Failed to load chunks",
+                        chunk_file=filename,
+                        error=str(exc),
+                    )
+                    continue
+
+                with self._cache_lock:
+                    self._chunk_cache[chunk_path] = loaded_chunks
+                    self._chunk_cache.move_to_end(chunk_path)
+                    if len(self._chunk_cache) > self._MAX_CHUNK_FILES:
+                        evicted_path, _ = self._chunk_cache.popitem(last=False)
+                        logger.debug(
+                            "Evicted cached chunk file",
+                            chunk_file=os.path.basename(evicted_path),
+                        )
+                    cached = loaded_chunks
+
+            documents.extend(cached)
+
+        return documents
+
+    def _ensure_chain(self) -> Optional[EnhancedRAGChain]:
+        chain = self._enhanced_chain
+        if chain is not None:
+            return chain
+
+        with self._chain_lock:
+            if self._enhanced_chain is not None:
+                return self._enhanced_chain
+
+            try:
+                vectordb = load_vector_store()
+                if not vectordb:
+                    logger.warning("Vector store not found, cannot create enhanced RAG chain")
+                    return None
+
+                documents = self._load_documents()
+                if not documents:
+                    logger.warning("No documents found for enhanced RAG chain")
+                    return None
+
+                self._enhanced_chain = EnhancedRAGChain(vectordb, documents)
+                logger.info(
+                    "Created enhanced RAG chain",
+                    documents=len(documents),
+                    chunk_files=len(self._chunk_cache),
+                )
+                return self._enhanced_chain
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.error("Failed to create enhanced RAG chain", error=str(exc))
+                return None
+
     def get_enhanced_chain(self) -> Optional[EnhancedRAGChain]:
         """Return a cached enhanced chain, creating it on demand."""
-        if self._enhanced_chain is not None:
-            return self._enhanced_chain
+        return self._ensure_chain()
 
-        try:
-            vectordb = load_vector_store()
-            if not vectordb:
-                logger.warning("Vector store not found, cannot create enhanced RAG chain")
-                return None
+    async def warmup(self) -> bool:
+        """Background warmup to prepare the enhanced chain without blocking requests."""
+        loop = asyncio.get_running_loop()
+        start = time.perf_counter()
+        chain = await loop.run_in_executor(None, self._ensure_chain)
+        duration = time.perf_counter() - start
+        if chain:
+            with self._cache_lock:
+                cache_size = len(self._chunk_cache)
+            logger.info(
+                "Warmup completed",
+                duration_seconds=round(duration, 4),
+                cached_files=cache_size,
+            )
+            return True
 
-            documents: List[Any] = []
-            if os.path.exists(PROCESSED_DATA_DIR):
-                for filename in os.listdir(PROCESSED_DATA_DIR):
-                    if filename.endswith("_chunks.pkl"):
-                        chunk_path = os.path.join(PROCESSED_DATA_DIR, filename)
-                        try:
-                            with open(chunk_path, "rb") as handle:
-                                chunks = pickle.load(handle)
-                            documents.extend(chunks)
-                        except Exception as exc:  # pylint: disable=broad-except
-                            logger.warning(
-                                "Failed to load chunks",
-                                chunk_file=filename,
-                                error=str(exc),
-                            )
-
-            if not documents:
-                logger.warning("No documents found for enhanced RAG chain")
-                return None
-
-            self._enhanced_chain = EnhancedRAGChain(vectordb, documents)
-            logger.info("Created enhanced RAG chain", documents=len(documents))
-            return self._enhanced_chain
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.error("Failed to create enhanced RAG chain", error=str(exc))
-            return None
+        logger.warning(
+            "Warmup completed without enhanced chain",
+            duration_seconds=round(duration, 4),
+        )
+        return False
 
     async def generate_response(
         self,
@@ -337,3 +408,10 @@ class RAGApplicationService:
 
     async def delete_conversation(self, conversation_id: int) -> bool:
         return await self._rag_service.delete_conversation(conversation_id)
+
+    async def warmup(self) -> bool:
+        try:
+            return await self._rag_service.warmup()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("RAG warmup failed", error=str(exc))
+            return False

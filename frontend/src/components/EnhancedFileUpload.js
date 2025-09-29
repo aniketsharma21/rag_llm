@@ -36,6 +36,10 @@ function EnhancedFileUpload() {
     () => ['.pdf', '.docx', '.txt', '.md', '.csv', '.json', '.pptx', '.xlsx'],
     [],
   );
+  const humanReadableTypes = useMemo(
+    () => ['PDF', 'DOCX', 'TXT', 'MD', 'CSV', 'JSON', 'PPTX', 'XLSX'],
+    [],
+  );
 
   /**
    * Show toast notification
@@ -81,6 +85,7 @@ function EnhancedFileUpload() {
       setUploadHistory(files.map(normalizeFileRecord));
     } catch (e) {
       console.error("Failed to fetch upload history:", e);
+      showToast('Unable to fetch uploaded files. Please try again later.', 'error');
     }
   }, [apiBaseUrl, normalizeFileRecord]);
 
@@ -215,7 +220,7 @@ function EnhancedFileUpload() {
         <div>
           <h2 className="text-3xl font-bold mb-2 text-gray-900 dark:text-white">Upload Documents</h2>
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            Drag and drop PDF, DOCX, or TXT files up to {MAX_SIZE_MB}MB or browse your computer.
+            Drag and drop {humanReadableTypes.join(', ')} files up to {MAX_SIZE_MB}MB or browse your computer.
           </p>
         </div>
 
@@ -268,7 +273,7 @@ function EnhancedFileUpload() {
                       Drop your file here, or <span className="text-blue-500">browse</span>
                     </p>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-                      Supports PDF, DOCX, and TXT files up to {MAX_SIZE_MB}MB
+                      Supports {humanReadableTypes.join(', ')} up to {MAX_SIZE_MB}MB
                     </p>
                   </div>
                 </>

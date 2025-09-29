@@ -51,6 +51,7 @@ export const ConversationStoreProvider = ({ children }) => {
   const [settings, setSettings] = useState(() => readJsonValue(SETTINGS_KEY, DEFAULT_SETTINGS));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeJobs, setActiveJobs] = useState({});
+  const [connectionNotice, setConnectionNotice] = useState(null);
 
   const jobPollersRef = useRef({});
   const isUnmountedRef = useRef(false);
@@ -182,8 +183,9 @@ export const ConversationStoreProvider = ({ children }) => {
     return () => {
       isUnmountedRef.current = true;
       stopAllJobPollers();
+      setConnectionNotice(null);
     };
-  }, [stopAllJobPollers]);
+  }, [stopAllJobPollers, setConnectionNotice]);
 
   const cleanupJobPoller = useCallback((jobId) => {
     const timeoutId = jobPollersRef.current[jobId];
@@ -396,6 +398,10 @@ export const ConversationStoreProvider = ({ children }) => {
       handleJobSubmission,
       handleFileUpload,
       stopAllJobPollers,
+
+      // Connection status
+      connectionNotice,
+      setConnectionNotice,
     }),
     [
       messages,
@@ -422,6 +428,8 @@ export const ConversationStoreProvider = ({ children }) => {
       handleFileUpload,
       stopAllJobPollers,
       getMessageById,
+      connectionNotice,
+      setConnectionNotice,
     ],
   );
 

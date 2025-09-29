@@ -102,36 +102,48 @@ def _get_loader(file_path):
 
 def _create_excel_loader(file_path):
     """
-    Create a custom loader for Excel files by converting to text format.
+    Create a custom loader for Excel files by converting the workbook to
+    a single in-memory document. This avoids persisting temporary files
+    on disk and keeps lifecycle management straightforward.
     
     Args:
         file_path (str): Path to the Excel file
         
     Returns:
-        TextLoader: Loader for the converted text content
+        Loader compatible with LangChain's document interface.
     """
     from langchain.schema import Document
-    
+
     try:
-        # Read Excel file
-        df = pd.read_excel(file_path, sheet_name=None)  # Read all sheets
-        
-        # Convert to text format
-        text_content = []
+        # Read every sheet and render a textual representation so downstream
+        # chunking receives a single unified payload.
+        df = pd.read_excel(file_path, sheet_name=None)
+
+        sections = []
         for sheet_name, sheet_df in df.items():
-            text_content.append(f"Sheet: {sheet_name}\n")
-            text_content.append(sheet_df.to_string(index=False))
-            text_content.append("\n\n")
-        
-        # Create a temporary text file
-        import tempfile
-        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
-        temp_file.write("".join(text_content))
-        temp_file.close()
-        
-        # Return TextLoader for the temporary file
-        return TextLoader(temp_file.name, encoding='utf-8')
-        
+            sections.append(f"Sheet: {sheet_name}\n")
+            sections.append(sheet_df.to_string(index=False))
+            sections.append("\n\n")
+
+        combined_text = "".join(sections).strip()
+        document = Document(
+            page_content=combined_text,
+            metadata={
+                "source": file_path,
+                "file_type": "xlsx",
+                "sheet_names": list(df.keys()),
+            },
+        )
+
+        class _ExcelInlineLoader:
+            def __init__(self, doc):
+                self._doc = doc
+
+            def load(self):
+                return [self._doc]
+
+        return _ExcelInlineLoader(document)
+
     except Exception as e:
         logger.error("Failed to process Excel file", file_path=file_path, error=str(e))
         raise DocumentProcessingError(

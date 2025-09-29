@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Uplo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 import uvicorn
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from src.llm import get_llm
 from src.logging_config import get_logger
 from src.exceptions import (
@@ -170,18 +170,19 @@ class QueryRequest(BaseModel):
     )
     conversation_id: Optional[int] = Field(None, description="Conversation ID for persistence")
     
-    @validator('question')
-    def validate_question(cls, v):
+    @field_validator('question')
+    @classmethod
+    def validate_question(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError('Question cannot be empty')
-        # Basic sanitization
-        v = v.strip()
-        if len(v) > 2000:
+        normalized = v.strip()
+        if len(normalized) > 2000:
             raise ValueError('Question too long (max 2000 characters)')
-        return v
-    
-    @validator('chat_history')
-    def validate_chat_history(cls, v):
+        return normalized
+
+    @field_validator('chat_history')
+    @classmethod
+    def validate_chat_history(cls, v: Optional[List[Dict[str, str]]]):
         if v and len(v) > 50:  # Limit chat history size
             return v[-50:]  # Keep only last 50 messages
         return v
@@ -190,14 +191,15 @@ class ConversationCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=200, description="Conversation title")
     user_id: str = Field(default="default_user", description="User ID for the conversation")
     
-    @validator('title')
-    def validate_title(cls, v):
+    @field_validator('title')
+    @classmethod
+    def validate_title(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError('Title cannot be empty')
-        v = v.strip()
-        if len(v) > 200:
+        normalized = v.strip()
+        if len(normalized) > 200:
             raise ValueError('Title too long (max 200 characters)')
-        return v
+        return normalized
 
 class QueryResponse(BaseModel):
     answer: str

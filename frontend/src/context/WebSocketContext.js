@@ -22,6 +22,7 @@ export const WebSocketProvider = ({ children }) => {
     addUserMessage,
     settings,
     stopAllJobPollers,
+    setConnectionNotice,
   } = useConversationStore();
 
   const wsRef = useRef(null);
@@ -186,6 +187,7 @@ export const WebSocketProvider = ({ children }) => {
       }
       setConnectionStatus('connected');
       setIsLoading(false);
+      setConnectionNotice(null);
       reconnectAttemptsRef.current = 0;
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
@@ -262,6 +264,7 @@ export const WebSocketProvider = ({ children }) => {
       setConnectionStatus('disconnected');
       stopAllJobPollers();
       currentResponseIdRef.current = null;
+      setConnectionNotice('Connection lost. Attempting to reconnect…');
 
       reconnectAttemptsRef.current += 1;
       const delay = Math.min(
@@ -305,6 +308,7 @@ export const WebSocketProvider = ({ children }) => {
           console.error('Error closing WebSocket on unmount:', error);
         }
       }
+      setConnectionNotice(null);
     };
   }, [connectWebSocket]);
 
@@ -316,6 +320,7 @@ export const WebSocketProvider = ({ children }) => {
     }
 
     pendingMessagesRef.current.push(payload);
+    setConnectionNotice('Reconnecting to server… your request will be sent automatically.');
     connectWebSocket();
     return false;
   }, [connectWebSocket]);
@@ -342,11 +347,12 @@ export const WebSocketProvider = ({ children }) => {
     const wasSent = sendPayload(payload);
     if (wasSent) {
       setIsLoading(true);
+      setConnectionNotice(null);
     } else {
       setConnectionStatus('connecting');
       appendSystemMessage('Waiting for server connection. Your request will be sent once connected.');
     }
-  }, [addUserMessage, appendSystemMessage, sendPayload, settings.model, settings.numDocs]);
+  }, [addUserMessage, appendSystemMessage, sendPayload, settings.model, settings.numDocs, setConnectionNotice]);
 
   const stopGeneration = useCallback(() => {
     const payload = { type: 'stop_generation' };

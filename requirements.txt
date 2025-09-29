@@ -3,7 +3,6 @@ fastapi>=0.104.1
 uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6
 python-dotenv>=1.0.0
-pydantic>=2.4.2
 pydantic-settings>=2.0.3
 
 # WebSocket
@@ -18,11 +17,11 @@ langchain-huggingface>=0.3.1
 langchain-chroma>=0.2.6
 langchain-groq>=0.3.8
 groq>=0.4.1
+torch>=2.2.0,<2.4.0
 
 # Document Processing
 PyPDF2>=3.0.1
 python-docx>=1.1.0
-unstructured>=0.10.30
 
 # Vector Store
 chromadb>=0.4.22
@@ -49,14 +48,9 @@ aiosqlite>=0.19.0
 alembic>=1.13.1
 structlog>=23.2.0
 python-json-logger>=2.0.7
-pydantic>=2.4.2
 
 # CORS
 fastapi-cors>=0.0.6
-async-timeout==4.0.3
-backoff==2.2.1
-banks==2.2.0
-blessed==1.20.0
 
 # Phase 3 Dependencies - RAG Improvements
 rank-bm25>=0.2.2

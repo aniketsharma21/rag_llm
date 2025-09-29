@@ -93,7 +93,8 @@ class EnhancedRAGChain:
         self.llm = get_llm()
         self.vector_store = vector_store
         self.documents = documents
-        
+        self.conversation_history: List[Dict[str, Any]] = []
+
         # Initialize hybrid retriever
         try:
             self.retriever = HybridRetriever(vector_store, documents)
@@ -118,6 +119,7 @@ class EnhancedRAGChain:
         k: int = 5,
         include_sources: bool = True,
         chat_history: Optional[List[Dict[str, Any]]] = None,
+        conversation_context: bool = True,
     ) -> Dict[str, Any]:
         """
         Process a query using enhanced RAG with hybrid retrieval.
@@ -128,13 +130,14 @@ class EnhancedRAGChain:
             k: Number of documents to retrieve
             include_sources: Whether to include source attribution
             chat_history: Conversation messages for additional context
+            conversation_context: Whether to leverage and persist conversation history
             
         Returns:
             Dictionary with answer, sources, and metadata
         """
         try:
             history = chat_history or []
-            use_context = bool(history)
+            use_context = bool(history) and conversation_context
 
             logger.info(
                 "Processing RAG query",
@@ -190,6 +193,9 @@ class EnhancedRAGChain:
                 "retrieval_stats": self.retriever.get_retrieval_stats() if hasattr(self.retriever, 'get_retrieval_stats') else {}
             }
             
+            if conversation_context:
+                self._record_interaction(question, answer, sources if include_sources else [])
+
             logger.info("RAG query completed", 
                        template_type=template_type, 
                        confidence=confidence_score,
@@ -361,6 +367,19 @@ class EnhancedRAGChain:
         formatted_answer = self._replace_bracket_citations(answer or "").strip()
         return formatted_answer
     
+    def _record_interaction(self, question: str, answer: str, sources: List[Dict[str, Any]]) -> None:
+        try:
+            entry = {
+                "user": question,
+                "assistant": answer,
+                "sources": sources,
+            }
+            self.conversation_history.append(entry)
+            if len(self.conversation_history) > 50:
+                self.conversation_history = self.conversation_history[-50:]
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Failed to record conversation history", error=str(exc))
+
     def _calculate_relevance_score(self, document: Document, answer: str) -> float:
         """Calculate relevance score between document and generated answer."""
         try:

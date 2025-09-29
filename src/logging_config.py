@@ -10,7 +10,7 @@ import sys
 import logging
 import structlog
 from structlog.contextvars import bind_contextvars, clear_contextvars
-from pythonjsonlogger import jsonlogger
+from pythonjsonlogger.json import JsonFormatter
 from typing import Any, Dict
 
 
@@ -80,7 +80,7 @@ def setup_logging(log_level: str = None, json_logs: bool = None) -> None:
         root_logger = logging.getLogger()
         if root_logger.handlers:
             handler = root_logger.handlers[0]
-            formatter = jsonlogger.JsonFormatter(
+            formatter = JsonFormatter(
                 '%(asctime)s %(name)s %(levelname)s %(message)s'
             )
             handler.setFormatter(formatter)

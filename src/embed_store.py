@@ -9,6 +9,7 @@ Usage:
 """
 
 import os
+from threading import Lock
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from src.config import (
@@ -23,6 +24,7 @@ from src.exceptions import EmbeddingError, VectorStoreError
 
 logger = get_logger(__name__)
 embedding_model = None
+_embedding_lock = Lock()
 
 def get_embedding_model():
     """
@@ -36,29 +38,33 @@ def get_embedding_model():
     if embedding_model is not None:
         return embedding_model
 
-    import torch  # Import torch to check for CUDA availability
+    with _embedding_lock:
+        if embedding_model is not None:
+            return embedding_model
 
-    model_name = EMBEDDING_MODEL
+        import torch  # Import torch to check for CUDA availability
 
-    # Check if a CUDA-enabled GPU is available, otherwise fall back to CPU
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    logger.info(f"Using device: {device}")  # Add a print statement to confirm
+        model_name = EMBEDDING_MODEL
 
-    model_kwargs = {'device': device}
+        # Check if a CUDA-enabled GPU is available, otherwise fall back to CPU
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        logger.info("Using embedding device", device=device)
 
-    os.makedirs(MODELS_CACHE_DIR, exist_ok=True)
+        model_kwargs = {'device': device}
 
-    try:
-        embedding_model = HuggingFaceEmbeddings(
-            model_name=model_name,
-            model_kwargs=model_kwargs,
-            cache_folder=MODELS_CACHE_DIR
-        )
-        logger.info("Successfully loaded embedding model", model=model_name, device=device)
-        return embedding_model
-    except Exception as e:
-        logger.error("Failed to load embedding model", model=model_name, error=str(e))
-        raise EmbeddingError(f"Failed to load embedding model: {str(e)}", {"model": model_name})
+        os.makedirs(MODELS_CACHE_DIR, exist_ok=True)
+
+        try:
+            embedding_model = HuggingFaceEmbeddings(
+                model_name=model_name,
+                model_kwargs=model_kwargs,
+                cache_folder=MODELS_CACHE_DIR
+            )
+            logger.info("Successfully loaded embedding model", model=model_name, device=device)
+            return embedding_model
+        except Exception as e:
+            logger.error("Failed to load embedding model", model=model_name, error=str(e))
+            raise EmbeddingError(f"Failed to load embedding model: {str(e)}", {"model": model_name})
 
 
 def build_vector_store(chunks):

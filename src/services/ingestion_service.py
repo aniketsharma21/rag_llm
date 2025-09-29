@@ -27,6 +27,20 @@ class IngestionService:
         os.makedirs(RAW_DATA_DIR, exist_ok=True)
         self._task_queue = task_queue or AsyncTaskQueue()
 
+    def _cleanup_file(self, file_path: str) -> None:
+        if not file_path:
+            return
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.debug("Removed staged upload", file_path=file_path)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning(
+                "Failed to remove staged upload",
+                file_path=file_path,
+                error=str(exc),
+            )
+
     async def enqueue_upload(self, file: UploadFile) -> Tuple[str, str]:
         """Persist the upload and register a background job."""
         payload = await file.read()
@@ -133,6 +147,7 @@ class IngestionService:
                         details=details,
                     )
                 logger.info("Ingest job skipped", job_id=job_id, file_path=file_path)
+                self._cleanup_file(file_path)
                 return {"chunks_processed": 0, "status": "skipped"}
 
             details["chunks_count"] = len(chunks)
@@ -181,15 +196,7 @@ class IngestionService:
                     error=str(update_exc),
                 )
 
-            try:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-            except Exception as cleanup_error:  # pylint: disable=broad-except
-                logger.warning(
-                    "Failed to cleanup file after ingest failure",
-                    file_path=file_path,
-                    error=str(cleanup_error),
-                )
+            self._cleanup_file(file_path)
 
             raise
 
