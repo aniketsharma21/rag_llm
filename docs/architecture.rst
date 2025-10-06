@@ -9,42 +9,56 @@ Runtime Topology
 High-level service interaction diagram:
 
 .. mermaid::
+   :align: center
+   :caption: Figure: System Architecture Overview
 
-   graph TD
-     subgraph Client
-       A[React Frontend]
-     end
-     subgraph API_Layer
-       B[FastAPI Application\n`src/api.py`]
-       C[Observability Middleware\n`src/middleware/observability.py`]
-     end
-     subgraph Services
-       D[Ingestion Service\n`IngestionService`]
-       E[RAG Service\n`RAGService`]
-       F[Application Facade\n`RAGApplicationService`]
-     end
-     subgraph Persistence
-       G[(SQLite conversations.db)]
-       H[(Chroma Vector Store)]
-       I[((Processed Chunks + Checksums))]
-     end
-     subgraph External
-       J[Groq / LLM Provider]
-       K[HuggingFace Embeddings]
-     end
+   %%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#f0f0f0'}}}%%
+   flowchart TD
+       classDef client fill:#e1f5fe,stroke:#039be5,stroke-width:2px
+       classDef api fill:#e8f5e9,stroke:#43a047,stroke-width:2px
+       classDef service fill:#fff3e0,stroke:#fb8c00,stroke-width:2px
+       classDef storage fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px
+       classDef external fill:#ffebee,stroke:#e53935,stroke-width:2px
 
-   A -->|REST / WebSocket| B
-   B --> C
-   B -->|Uploads| D
-   B -->|Query| E
-   D -->|Async Jobs| F
-   E -->|Warmup + Query| F
-   F --> G
-   D --> H
-   D --> I
-   E --> H
-   E --> J
-   D --> K
+       subgraph Client["Client"]
+           A[React Frontend]:::client
+       end
+
+       subgraph API_Layer["API Layer"]
+           B[FastAPI Application<br><small>src/api.py</small>]:::api
+           C[Observability Middleware<br><small>src/middleware/observability.py</small>]:::api
+       end
+
+       subgraph Services["Services"]
+           D[Ingestion Service<br><code>IngestionService</code>]:::service
+           E[RAG Service<br><code>RAGService</code>]:::service
+           F[Application Facade<br><code>RAGApplicationService</code>]:::service
+       end
+
+       subgraph Persistence["Persistence"]
+           G[(SQLite<br>conversations.db)]:::storage
+           H[(Chroma<br>Vector Store)]:::storage
+           I[Processed Chunks<br>+ Checksums]:::storage
+       end
+
+       subgraph External["External Services"]
+           J[Groq / LLM Provider]:::external
+           K[HuggingFace<br>Embeddings]:::external
+       end
+
+       %% Connections with arrows
+       A <-->|REST / WebSocket| B
+       B --> C
+       B -->|Uploads| D
+       B -->|Query| E
+       D -->|Async Jobs| F
+       E -->|Warmup + Query| F
+       F <--> G
+       D <--> H
+       D --> I
+       E <--> H
+       E <--> J
+       D <--> K
 
 Execution Sequence
 ------------------

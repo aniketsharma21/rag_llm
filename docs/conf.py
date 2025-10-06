@@ -34,12 +34,75 @@ extensions = [
     "sphinx_copybutton",
 ]
 
+# Autodoc settings
 autosummary_generate = True
-napoleon_google_docstring = False
+autodoc_typehints = 'description'
+add_module_names = False
+
+# Napoleon settings
+napoleon_google_docstring = True
 napoleon_numpy_docstring = True
+napoleon_include_init_with_doc = True
+napoleon_include_private_with_doc = True
+napoleon_include_special_with_doc = True
+napoleon_use_admonition_for_examples = True
+napoleon_use_admonition_for_notes = True
+napoleon_use_admonition_for_references = True
+napoleon_use_ivar = True
+napoleon_use_param = True
+napoleon_use_rtype = True
 napoleon_attr_annotations = True
 
+# Todo settings
 todo_include_todos = True
+todo_link_only = True
+
+# Intersphinx configuration
+intersphinx_mapping = {
+    'python': ('https://docs.python.org/3', None),
+    'numpy': ('https://numpy.org/doc/stable/', None),
+    'pandas': ('https://pandas.pydata.org/pandas-docs/stable/', None),
+    'torch': ('https://pytorch.org/docs/stable/', None),
+    'transformers': ('https://huggingface.co/docs/transformers/main/en/', None),
+    'fastapi': ('https://fastapi.tiangolo.com/', None),
+    'pydantic': ('https://docs.pydantic.dev/latest/', None),
+    'sqlalchemy': ('https://docs.sqlalchemy.org/en/20/', None),
+    'langchain': ('https://python.langchain.com/docs/', None),
+}
+
+# Mermaid configuration
+mermaid_version = "10.9.1"
+mermaid_output_format = "raw"
+mermaid_init_js = "mermaid.initialize({startOnLoad:true, theme: 'default'});"
+
+# Copy button configuration
+copybutton_prompt_text = r'>>> |\.\.\. |\$ |In \[\d+\]: |\s*\.\.\.: |\s*\$ |\s*# |\s*>>> '
+copybutton_prompt_is_regexp = True
+copybutton_line_continuation_character = '\\'
+
+# Sphinx design configuration
+html_static_path = ['_static']
+html_css_files = ['css/custom.css']
+html_js_files = ['js/custom.js']
+
+# Theme options
+html_theme_options = {
+    'navigation_depth': 4,
+    'collapse_navigation': False,
+    'sticky_navigation': True,
+    'includehidden': True,
+    'titles_only': False,
+    'show_prev_next': True,
+    'style_external_links': True,
+    'github_url': 'https://github.com/aniketsharma21/rag_llm',
+    'use_edit_page_button': True,
+    'repository_url': 'https://github.com/aniketsharma21/rag_llm',
+    'repository_branch': 'master',
+    'path_to_docs': 'docs',
+    'use_issues_button': True,
+    'use_repository_button': True,
+    'use_download_button': True,
+}
 
 intersphinx_mapping = {
     "python": (
