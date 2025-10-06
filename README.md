@@ -1,280 +1,162 @@
 # 🚀 Enterprise-Ready RAG Pipeline
 
-A robust, modular, and production-oriented framework for building Retrieval-Augmented Generation (RAG) applications. Features a FastAPI backend and React frontend, designed for enterprise use cases with configuration-driven design, cost-efficiency, and extensibility.
-
-## 🆕 Recent Updates (2025-09-22)
-
-- Enhanced UI and UX in the frontend: improved navigation, sidebar, and chat experience.
-- Integrated `react-router-dom` for client-side routing in the React frontend.
+A robust, modular, and production-oriented framework for building Retrieval-Augmented Generation (RAG) applications. This project features a FastAPI backend and a modern React frontend styled with Tailwind CSS, designed for enterprise use cases with a focus on configuration-driven design, cost-efficiency, and extensibility.
 
 ## 🌟 Features
 
 ### Backend
-- **Document Processing**
-  - Supports multiple formats: PDF, DOCX, TXT
-  - Smart chunking with configurable parameters
-  - Checksum verification to avoid redundant processing
-  
-- **Vector Storage**
-  - Persistent storage with ChromaDB
-  - Efficient similarity search
-  - Automatic embedding generation
-  
-- **LLM Integration**
-  - Powered by Groq for fast inference
-  - Configurable models and parameters
-  - Support for different LLM providers
-  
-- **API Layer**
-  - RESTful API with FastAPI
-  - WebSocket support for real-time updates
-  - Comprehensive API documentation
+- **Document Processing**: Handles 8+ formats (PDF, DOCX, TXT, MD, CSV, JSON, PPTX, XLSX) with smart chunking, checksum validation, and graceful error handling via custom exceptions.
+- **Vector & Hybrid Retrieval**: Builds persistent ChromaDB stores and combines semantic search with BM25 keyword ranking through an ensemble retriever with configurable weights.
+- **LLM Orchestration**: Integrates Groq-hosted models alongside HuggingFace embeddings, advanced prompt templates, conversation memory, and confidence scoring.
+- **API & Infrastructure**: FastAPI layer with REST and WebSocket streaming, structured logging (via `structlog`), database-backed conversation persistence, and resilient fallbacks.
+- **Async Ingest Workflow**: `/ingest` returns `job_id`s, `/status/{job_id}` provides progress updates, and post-ingest payloads automatically refresh vector stores.
+- **Document Services**: `/files` lists uploaded sources (with metadata and preview URLs) and `/files/preview/{filename}` streams sanitized PDF previews for inline viewing.
 
 ### Frontend
-- **Modern React Interface**
-  - Clean, responsive design
-  - Real-time chat interface
-  - Document upload and management
-  - Conversation history
-  - Enhanced navigation and sidebar (2025-09-22)
-  - Routing with `react-router-dom` (2025-09-22)
+- **Modern React Interface**: Responsive React + Tailwind UI with polished animations, mobile-first layouts, and accessibility-focused interactions.
+- **Real-time Chat**: Interactive WebSocket streaming with executive-summary-first delivery, enhanced message actions (copy, share, timestamps), and improved loading states.
+- **Intuitive Workflows**: Drag & drop uploads, advanced document search in the sidebar, rich document-level source cards, toast notifications, and inline PDF preview modals.
+- **Customizable**: Light/dark themes, configurable model settings, and modular components ready for enterprise branding.
+
+## ✨ Recent Enhancements
+
+-   **Hybrid Retrieval Engine** (`src/retrieval.py`): Semantic + BM25 ensemble retriever with conversation-aware context selection.
+-   **Advanced Prompting** (`src/prompt_templates.py`): Six specialized templates with automatic selection, context pruning, and source-aware formatting.
+-   **Structured Logging & Exceptions** (`src/logging_config.py`, `src/exceptions.py`): JSON logs, contextual metadata, and domain-specific exception hierarchy.
+-   **Persistence Layer** (`src/database.py`): SQLAlchemy models for conversation/document history with CRUD helpers.
+-   **Streaming UX** (`src/api.py`, `frontend/src/App.js`): Summaries stream before detail paragraphs, stop-generation is honored immediately, and chat messages merge role-tagged chunks automatically.
+-   **Service Layer Abstractions** (`src/services/ingestion_service.py`, `src/services/rag_service.py`): API endpoints now orchestrate ingestion and query flows through dedicated services with improved error handling and async patterns.
+-   **Shared Frontend Configuration** (`frontend/src/context/ConfigContext.js`): Centralized WebSocket/API configuration exposed through a React context provider, simplifying consumption in `App.js` and upload/chat components.
+-   **Test Coverage** (`tests/test_ingestion_service.py`, `tests/test_rag_service.py`): Added focused unit suites for the new services and updated ingestion tests to rely on temporary fixtures instead of cached artifacts.
+-   **Rich Source Cards** (`frontend/src/components/EnhancedMessage.js`): Document-level aggregation with snippets, page ranges, relevance hints, preview buttons, and accessibility tweaks.
+-   **Upload Workbench** (`frontend/src/components/EnhancedFileUpload.js` + `/files` endpoint): Drag & drop uploads with history, toast feedback, and inline PDF preview modals backed by sanitized download URLs.
 
 ## 🏗️ Project Structure
 
 ```
 rag_llm/
 ├── chroma_store/          # Vector database storage
-├── data/                  # Document storage
-│   ├── raw/               # Original documents
-│   └── processed/         # Processed chunks and metadata
-├── frontend/              # React frontend
-│   ├── public/            # Static assets
-│   └── src/               # React source code
-├── src/                   # Python source code
-│   ├── prompts/           # Prompt templates
-│   ├── api.py             # FastAPI application
-│   ├── config.py          # Configuration settings
+├── data/                  # Document storage (raw and processed)
+├── frontend/              # React + Tailwind CSS frontend
+├── src/                   # Python backend source code
+│   ├── api.py             # FastAPI application (REST + WebSocket)
+│   ├── config.py          # Configuration settings & environment loading
+│   ├── database.py        # Conversation/document persistence layer
 │   ├── embed_store.py     # Vector store operations
-│   ├── ingest.py          # Document processing
-│   ├── llm.py             # LLM integration
-│   └── main.py            # CLI entry point
+│   ├── exceptions.py      # Custom exception hierarchy
+│   ├── ingest.py          # Document processing & loaders
+│   ├── llm.py             # LLM orchestration and prompt routing
+│   ├── logging_config.py  # Structured logging setup
+│   ├── prompt_templates.py# Advanced prompt templates & manager
+│   ├── retrieval.py       # Hybrid retriever implementations
+│   └── main.py            # CLI entry point for indexing/querying
 ├── tests/                 # Test files
-├── .env                   # Environment variables
-├── environment.yml        # Conda environment
-├── requirements.txt       # Python dependencies
-└── setup.sh               # Setup script
+├── environment.yml        # Conda environment definition
+└── requirements.txt       # Python dependencies
 ```
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.9+
-- Node.js 16+
-- Conda (recommended)
+-   Python 3.9+
+-   Node.js 18+ and npm 9+
+-   Conda (recommended for Python environment management)
 
-### Installation
+### Installation & Setup
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd rag_llm
-   ```
+1.  **Clone the Repository**
+    ```bash
+    git clone <repository-url>
+    cd rag_llm
+    ```
 
-2. **Set up Python environment**
-   ```bash
-   # Using conda (recommended)
-   conda env create -f environment.yml
-   conda activate rag_llm
-   
-   # Or with virtualenv
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
+2.  **Set Up the Backend**
+    -   **Create Environment**:
+        ```bash
+        # Using conda (recommended)
+        conda env create -f environment.yml
+        conda activate rag_llm
 
-3. **Set up frontend**
-   ```bash
-   cd frontend
-   npm install
-   cd ..
-   ```
+        # Or with a standard virtual environment
+        python -m venv venv
+        source venv/bin/activate  # On Windows: venv\Scripts\activate
+        pip install -r requirements.txt -r requirements-clean.txt
+        ```
+    -   **Configure Environment Variables**: Runtime configuration is powered by the [`AppSettings`](src/config.py) Pydantic settings object, which merges `.env` values with optional `config.yaml` defaults. Create a `.env` file in the project root to supply required secrets.
+        ```env
+        # Required for LLM integration
+        GROQ_API_KEY=your_groq_api_key_here
 
-4. **Configure environment variables**
-   Create a `.env` file in the root directory:
-   ```env
-   # API Keys
-   OPENAI_API_KEY=your_openai_key
-   GROQ_API_KEY=your_groq_key
-   
-   # Application Settings
-   DEBUG=True
-   CHROMA_DB_PATH=./chroma_store
-   ```
+        # Optional: For using OpenAI models
+        OPENAI_API_KEY=your_openai_key_here
+        ```
+        You can also populate `config.yaml` with non-secret defaults (for example, `chunk_size`, `embedding_model`). Both files are loaded automatically during startup.
+
+3.  **Set Up the Frontend**
+    ```bash
+    cd frontend
+    npm install
+    cd ..
+    ```
+
+4.  **(Optional) Seed Documents**
+    Place PDFs and other supported files under `data/raw/` or upload from the UI. The backend will create previews under `/files/preview/{filename}` automatically.
 
 ## 🖥️ Usage
 
-### Backend (CLI)
+1.  **Start the Backend Server**
+    From the project root, run:
+    ```bash
+    uvicorn src.api:app --reload
+    ```
+    The backend API will be available at `http://localhost:8000`.
 
-1. **Index documents**
-   ```bash
-   python -m src.main index --file data/raw/your_document.pdf
-   ```
+2.  **Start the Frontend Development Server**
+    In a **new terminal**, from the project root, run:
+    ```bash
+    cd frontend
+    npm start
+    ```
+    The web interface will be available at `http://localhost:3000`.
 
-2. **Query the system**
-   ```bash
-   python -m src.main query "Your question here"
-   ```
+3.  **Upload Documents and Chat**
+    -   Navigate to the "Upload Documents" page to drag & drop new files, monitor ingest status, and open the preview modal via the eye icon.
+    -   Use the "New Chat" view to ask questions; summaries stream first, followed by grouped detail bullets and document cards.
+    -   Source cards provide quick "Preview" and "Open" options using the backend preview service.
 
-### Web Interface
+### Using the Backend CLI (Optional)
 
-1. **Start the backend server**
-   ```bash
-   uvicorn src.api:app --reload
-   ```
+You can also interact with the RAG pipeline directly via the command line.
 
-2. **Start the frontend**
-   ```bash
-   cd frontend
-   npm start
-   ```
-
-3. Open `http://localhost:3000` in your browser
-
-## 📚 API Documentation
-
-Once the server is running, access the interactive API documentation at:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+-   **Index a document**:
+    ```bash
+    python -m src.main index --file path/to/your/document.pdf
+    ```
+-   **Query the system**:
+    ```bash
+    python -m src.main query "Your question here"
+    ```
 
 ## 🧪 Testing
 
-Run the test suite with:
-```bash
-pytest tests/
-```
-
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these steps:
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📄 License
-
-Distributed under the MIT License. See `LICENSE` for more information.
-
-## 📧 Contact
-
-For questions or feedback, please open an issue on GitHub.
-
-## 📚 Resources
-
-- [LangChain Documentation](https://python.langchain.com/)
-- [ChromaDB Documentation](https://www.trychroma.com/)
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [React Documentation](https://reactjs.org/)
-
-```
-rag_llm/
-├── data/                    # Raw and processed documents
-│   ├── raw/                 # Original documents
-│   └── processed/           # Processed chunks and checksums
-├── frontend/                # React frontend
-├── src/                     # Backend source code
-│   ├── api.py               # FastAPI application
-│   ├── config.py            # Configuration settings
-│   ├── embed_store.py       # Vector store operations
-│   ├── ingest.py            # Document processing
-│   ├── llm.py               # LLM initialization
-│   └── prompts/             # Prompt templates
-└── tests/                   # Test files
-```
-
-## Setup
-
-### Backend Setup
-
-1. Create and activate a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: .\venv\Scripts\activate
-   ```
-
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Set up environment variables:
-   Create a `.env` file in the project root with:
-   ```
-   GROQ_API_KEY=your_groq_api_key_here
-   ```
-
-### Frontend Setup
-
-1. Navigate to the frontend directory:
-   ```bash
-   cd frontend
-   ```
-
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Ensure `react-router-dom` is installed:
-   ```bash
-   npm install react-router-dom
-   ```
-
-## Running the Application
-
-### Start the Backend
-
-```bash
-uvicorn src.api:app --reload
-```
-
-The API will be available at `http://localhost:8000`
-
-### Start the Frontend
-
-In a new terminal:
-
-```bash
-cd frontend
-npm start
-```
-
-The frontend will be available at `http://localhost:3000`
-
-## API Endpoints
-
-- `GET /health` - Health check
-- `POST /ingest` - Upload and index a document
-- `POST /query` - Query the RAG system
-
-## Development
-
-### Testing
-
-Run tests with:
-
+To run the backend test suite, use `pytest` from the project root:
 ```bash
 pytest
 ```
 
-### Environment Variables
+## 📡 API Reference
 
-- `GROQ_API_KEY`: Your Groq API key
-- `CHUNK_SIZE`: Document chunk size (default: 1000)
-- `CHUNK_OVERLAP`: Chunk overlap (default: 200)
-- `VECTOR_STORE_PATH`: Path to store vector database (default: "./chroma_store")
+* **`POST /ingest`** — Accepts multipart uploads, responds with `job_id` for async processing.
+* **`GET /status/{job_id}`** — Returns ingest progress, completion state, and diagnostics.
+* **`GET /files`** — Lists uploaded documents with size, timestamps, and preview URLs.
+* **`GET /files/preview/{filename}`** — Streams the sanitized PDF preview used by the frontend modal.
+* **`POST /query`** — REST query interface (non-streaming fallback).
+* **`/ws/chat`** — WebSocket endpoint supporting streaming replies, stop-generation, and feedback events.
 
-## License
+## 🤝 Contributing
 
-MIT
+Contributions are welcome! Please fork the repository and submit a pull request.
+
+## 📄 License
+
+This project is distributed under the MIT License. See the `LICENSE` file for more information.

@@ -7,21 +7,63 @@ document ingestion and querying. Includes WebSocket support for real-time update
 import os
 import json
 import asyncio
-from operator import itemgetter
+import time
 from typing import List, Optional, Dict, Any
+from datetime import datetime
+import contextlib
+from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, status
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, status, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, FileResponse
 import uvicorn
-from pydantic import BaseModel, Field
-from langchain.prompts import PromptTemplate
-from langchain.schema.output_parser import StrOutputParser
-from fastapi.responses import FileResponse
-
-from src.ingest import process_document
-from src.embed_store import build_vector_store, get_retriever, load_vector_store
+from pydantic import BaseModel, Field, field_validator
 from src.llm import get_llm
-from src.config import logger
+from src.logging_config import get_logger
+from src.exceptions import (
+    RAGException,
+    DocumentProcessingError,
+    VectorStoreError,
+    LLMError,
+    ValidationError,
+    ConversationError,
+)
+from src.db.repositories import ConversationRepository, JobRepository
+from src.db.session import get_session, init_database
+from src.services.ingestion_service import IngestionService
+from src.services.rag_service import RAGService, RAGApplicationService
+from src.middleware.observability import setup_observability
+
+# Initialize logger
+logger = get_logger(__name__)
+
+ingestion_service = IngestionService()
+rag_service = RAGService()
+app_service = RAGApplicationService(ingestion_service, rag_service)
+
+
+def _get_files_inventory() -> List[Dict[str, Any]]:
+    from src.config import RAW_DATA_DIR
+
+    inventory: List[Dict[str, Any]] = []
+    if not os.path.exists(RAW_DATA_DIR):
+        return inventory
+
+    for entry in os.listdir(RAW_DATA_DIR):
+        absolute_path = os.path.join(RAW_DATA_DIR, entry)
+        if not os.path.isfile(absolute_path):
+            continue
+
+        stats = os.stat(absolute_path)
+        inventory.append({
+            "name": entry,
+            "size": stats.st_size,
+            "uploadDate": datetime.fromtimestamp(stats.st_mtime).isoformat(),
+            "previewUrl": f"/files/preview/{quote(entry)}",
+        })
+
+    inventory.sort(key=lambda item: item["uploadDate"], reverse=True)
+    return inventory
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -30,22 +72,134 @@ app = FastAPI(
     version="0.2.0"
 )
 
+setup_observability(app)
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    await init_database()
+
 # CORS middleware configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Allow React frontend
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
+# Exception Handlers
+@app.exception_handler(DocumentProcessingError)
+async def document_processing_exception_handler(request: Request, exc: DocumentProcessingError):
+    logger.error("Document processing error", error=str(exc), details=exc.details)
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "Document Processing Error",
+            "message": exc.message,
+            "details": exc.details
+        }
+    )
+
+@app.exception_handler(VectorStoreError)
+async def vector_store_exception_handler(request: Request, exc: VectorStoreError):
+    logger.error("Vector store error", error=str(exc), details=exc.details)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Vector Store Error",
+            "message": exc.message,
+            "details": exc.details
+        }
+    )
+
+@app.exception_handler(LLMError)
+async def llm_exception_handler(request: Request, exc: LLMError):
+    logger.error("LLM error", error=str(exc), details=exc.details)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": "LLM Service Error",
+            "message": exc.message,
+            "details": exc.details
+        }
+    )
+
+@app.exception_handler(ValidationError)
+async def validation_exception_handler(request: Request, exc: ValidationError):
+    logger.warning("Validation error", error=str(exc), details=exc.details)
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": "Validation Error",
+            "message": exc.message,
+            "details": exc.details
+        }
+    )
+
+@app.exception_handler(ConversationError)
+async def conversation_exception_handler(request: Request, exc: ConversationError):
+    logger.error("Conversation error", error=str(exc), details=exc.details)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Conversation Error",
+            "message": exc.message,
+            "details": exc.details
+        }
+    )
+
+@app.exception_handler(RAGException)
+async def rag_exception_handler(request: Request, exc: RAGException):
+    logger.error("RAG pipeline error", error=str(exc), details=exc.details)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "RAG Pipeline Error",
+            "message": exc.message,
+            "details": exc.details
+        }
+    )
+
 # Request/Response Models
 class QueryRequest(BaseModel):
-    question: str
+    question: str = Field(..., min_length=1, max_length=2000, description="User question")
     chat_history: Optional[List[Dict[str, str]]] = Field(
         default_factory=list,
         description="List of previous messages in the conversation"
     )
+    conversation_id: Optional[int] = Field(None, description="Conversation ID for persistence")
+    
+    @field_validator('question')
+    @classmethod
+    def validate_question(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('Question cannot be empty')
+        normalized = v.strip()
+        if len(normalized) > 2000:
+            raise ValueError('Question too long (max 2000 characters)')
+        return normalized
+
+    @field_validator('chat_history')
+    @classmethod
+    def validate_chat_history(cls, v: Optional[List[Dict[str, str]]]):
+        if v and len(v) > 50:  # Limit chat history size
+            return v[-50:]  # Keep only last 50 messages
+        return v
+
+class ConversationCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200, description="Conversation title")
+    user_id: str = Field(default="default_user", description="User ID for the conversation")
+    
+    @field_validator('title')
+    @classmethod
+    def validate_title(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('Title cannot be empty')
+        normalized = v.strip()
+        if len(normalized) > 200:
+            raise ValueError('Title too long (max 200 characters)')
+        return normalized
 
 class QueryResponse(BaseModel):
     answer: str
@@ -53,15 +207,56 @@ class QueryResponse(BaseModel):
         default_factory=list,
         description="List of source documents with metadata"
     )
+    confidence_score: Optional[float] = Field(
+        None,
+        description="Confidence score for the answer (0.0 to 1.0)"
+    )
+    template_used: Optional[str] = Field(
+        None,
+        description="Prompt template used for generation"
+    )
+    num_sources: Optional[int] = Field(
+        None,
+        description="Number of source documents retrieved"
+    )
+
+
+class IngestResponse(BaseModel):
+    job_id: str
+    status: str
+    message: Optional[str] = None
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    file_name: str
+    status: str
+    message: Optional[str] = None
+    details: Dict[str, Any] = Field(default_factory=dict)
+    error: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
 
 class HealthResponse(BaseModel):
     status: str
     model: str
 
+class ConversationResponse(BaseModel):
+    id: int
+    title: str
+    messages: List[Dict[str, Any]]
+    created_at: str
+    updated_at: str
+
+class ConversationListResponse(BaseModel):
+    conversations: List[Dict[str, Any]]
+    total: int
+
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        self._active_tasks: Dict[WebSocket, asyncio.Task] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -69,6 +264,9 @@ class ConnectionManager:
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
+        task = self._active_tasks.pop(websocket, None)
+        if task and not task.done():
+            task.cancel()
 
     async def send_personal_message(self, message: str, websocket: WebSocket):
         await websocket.send_text(message)
@@ -80,6 +278,15 @@ class ConnectionManager:
             except Exception as e:
                 logger.error(f"Error broadcasting message: {e}")
                 self.disconnect(connection)
+
+    def set_task(self, websocket: WebSocket, task: asyncio.Task) -> None:
+        self._active_tasks[websocket] = task
+
+    def get_task(self, websocket: WebSocket) -> Optional[asyncio.Task]:
+        return self._active_tasks.get(websocket)
+
+    def clear_task(self, websocket: WebSocket) -> None:
+        self._active_tasks.pop(websocket, None)
 
 manager = ConnectionManager()
 
@@ -100,97 +307,147 @@ async def health_check():
         )
 
 # Document upload endpoint
-@app.post("/ingest")
+@app.post("/ingest", response_model=IngestResponse)
 async def ingest_document(file: UploadFile = File(...)):
     """
     Upload and index a document for the RAG pipeline.
     
     Args:
-        file: The document file to upload (PDF, DOCX, or TXT)
+        file: The document file to upload (PDF, DOCX, TXT, CSV, JSON, MD, PPTX, XLSX)
     """
-    file_path = None  # Ensure file_path is always defined
     try:
-        # Save the uploaded file temporarily
-        file_path = f"temp_{file.filename}"
-        with open(file_path, "wb") as buffer:
-            buffer.write(await file.read())
-        
-        # Process the document
-        chunks = process_document(file_path)
-        if chunks:
-            build_vector_store(chunks)
-            return {"status": "success", "message": f"Document '{file.filename}' processed successfully"}
-        else:
-            return {"status": "skipped", "message": "Document not processed (no changes detected)"}
-            
-    except Exception as e:
-        logger.error(f"Error processing document: {str(e)}")
+        job_id, file_path = await app_service.ingest_document(file)
+
+        return IngestResponse(
+            job_id=job_id,
+            status="queued",
+            message=f"Document '{file.filename}' received. Processing has started.",
+        )
+
+    except Exception as exc:
+        logger.error("Error processing document", error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing document: {str(e)}"
+            detail=f"Error processing document: {exc}",
         )
     finally:
-        # Clean up temporary file
-        if file_path and os.path.exists(file_path):
-            os.remove(file_path)
+        await file.close()
+
+
+@app.get("/status/{job_id}", response_model=JobStatusResponse)
+async def get_job_status(job_id: str):
+    """Return current status for a previously submitted ingest job."""
+    record = await app_service.get_job_status(job_id)
+
+    if record is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return JobStatusResponse(
+        job_id=record["job_id"],
+        file_name=record["file_name"],
+        status=record["status"],
+        message=record.get("message"),
+        details=record.get("details", {}),
+        error=record.get("error"),
+        created_at=record["created_at"],
+        updated_at=record["updated_at"],
+    )
+
+
+@app.get("/files")
+async def list_uploaded_files():
+    try:
+        files = await asyncio.to_thread(_get_files_inventory)
+        return {"files": files}
+    except Exception as exc:
+        logger.error("Failed to list uploaded files", error=str(exc))
+        raise HTTPException(status_code=500, detail="Unable to list uploaded files")
+
+
+async def _process_websocket_query(
+    websocket: WebSocket,
+    question: str,
+    chat_history: List[Dict[str, Any]],
+    conversation_id: Optional[int] = None,
+) -> None:
+    """Process a single WebSocket query message and stream the answer."""
+    await manager.send_personal_message(
+        json.dumps({"type": "status", "status": "processing"}),
+        websocket,
+    )
+
+    try:
+        result = await app_service.query(
+            question=question,
+            chat_history=chat_history,
+            conversation_id=conversation_id,
+        )
+
+        await manager.send_personal_message(
+            json.dumps(
+                {
+                    "type": "complete",
+                    "content": result["answer"],
+                    "sources": result.get("sources", []),
+                    "confidence_score": result.get("confidence_score"),
+                    "template_used": result.get("template_used"),
+                    "num_sources": result.get("num_sources"),
+                }
+            ),
+            websocket,
+        )
+
+    except RuntimeError as exc:
+        await manager.send_personal_message(
+            json.dumps({"type": "error", "message": str(exc)}),
+            websocket,
+        )
+    except asyncio.CancelledError:
+        logger.info("Generation cancelled for WebSocket client", websocket_client=str(getattr(websocket, "client", "unknown")))
+        await manager.send_personal_message(
+            json.dumps({"type": "status", "status": "stopped"}),
+            websocket,
+        )
+        raise
+    except Exception as exc:
+        logger.error("Error processing WebSocket query", error=str(exc), exc_info=True)
+        await manager.send_personal_message(
+            json.dumps({"type": "error", "message": f"Error processing your request: {exc}"}),
+            websocket,
+        )
+
 
 # Query endpoint
 @app.post("/query", response_model=QueryResponse)
 async def query_rag(query: QueryRequest):
     """
-    Query the RAG pipeline with a question.
+    Enhanced query endpoint using the improved RAG pipeline with hybrid retrieval.
     
     Args:
         query: The query request containing the question and optional chat history
     """
     try:
-        llm = get_llm()
-        vectordb = load_vector_store()
-        if not vectordb:
-            raise HTTPException(
-                status_code=500,
-                detail="Vector store not found. Please upload and ingest a document first."
-            )
-        retriever = get_retriever(vectordb)
-        if not retriever:
-            raise HTTPException(
-                status_code=500,
-                detail="Retriever could not be created."
-            )
-        template = """Answer the question based on the following context. Cite the source document if possible.\n{context}\n\nQuestion: {question}\n"""
-        prompt = PromptTemplate(
-            template=template,
-            input_variables=["context", "question"]
+        result = await app_service.query(
+            question=query.question,
+            chat_history=query.chat_history or [],
+            conversation_id=query.conversation_id,
         )
-        async def get_context(x):
-            docs = await retriever.ainvoke(x["question"])
-            context = "\n\n".join([
-                f"[Source: {getattr(d, 'metadata', {}).get('source', 'unknown')}] {d.page_content}" for d in docs
-            ])
-            x["_retrieved_docs"] = docs  # Attach docs for later use
-            return context
-        rag_chain = (
-            {"context": get_context, "question": lambda x: x["question"]}
-            | prompt
-            | llm
-            | StrOutputParser()
+
+        return QueryResponse(
+            answer=result["answer"],
+            sources=result.get("sources", []),
+            confidence_score=result.get("confidence_score"),
+            template_used=result.get("template_used"),
+            num_sources=result.get("num_sources"),
         )
-        # Run the chain and get docs
-        input_obj = {"question": query.question}
-        answer = await rag_chain.ainvoke(input_obj)
-        docs = input_obj.get("_retrieved_docs", [])
-        sources = [getattr(d, 'metadata', {}) for d in docs]
-        return {
-            "answer": answer,
-            "sources": sources
-        }
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error(f"Error processing query: {str(e)}")
+
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error processing query", error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing query: {str(e)}"
+            detail=f"Error processing query: {exc}",
         )
 
 # WebSocket endpoint for chat
@@ -199,247 +456,230 @@ async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time chat with the RAG pipeline."""
     try:
         await manager.connect(websocket)
-        logger.info(f"New WebSocket connection from {websocket.client}")
-        
-        # Send initial connection confirmation
+        logger.info("New WebSocket connection", client=str(getattr(websocket, "client", "unknown")))
+
         await manager.send_personal_message(
             json.dumps({"type": "status", "status": "connected"}),
-            websocket
+            websocket,
         )
-        
+
         while True:
             try:
-                # Set a timeout for receiving messages
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=300)  # 5 minute timeout
-                
-                try:
-                    message = json.loads(data)
-                except json.JSONDecodeError:
-                    logger.warning(f"Received invalid JSON: {data}")
-                    await manager.send_personal_message(
-                        json.dumps({
-                            "type": "error",
-                            "message": "Invalid JSON format"
-                        }),
-                        websocket
-                    )
-                    continue
-                
-                if message.get("type") == "query":
-                    # Process the query
-                    question = message.get("question", "")
-                    if not question.strip():
-                        await manager.send_personal_message(
-                            json.dumps({
-                                "type": "error",
-                                "message": "Question cannot be empty"
-                            }),
-                            websocket
-                        )
-                        continue
-                        
-                    chat_history = message.get("chat_history", [])
-                    
-                    # Send acknowledgment
-                    await manager.send_personal_message(
-                        json.dumps({"type": "status", "status": "processing"}),
-                        websocket
-                    )
-                    
-                    try:
-                        llm = get_llm()
-                        vectordb = load_vector_store()
-                        if not vectordb:
-                            await manager.send_personal_message(
-                                json.dumps({
-                                    "type": "error",
-                                    "message": "Vector store not found. Please upload and ingest a document first."
-                                }),
-                                websocket
-                            )
-                            continue
-                        retriever = get_retriever(vectordb)
-                        if not retriever:
-                            await manager.send_personal_message(
-                                json.dumps({
-                                    "type": "error",
-                                    "message": "Retriever could not be created."
-                                }),
-                                websocket
-                            )
-                            continue
-                        formatted_history = "\n".join([
-                            f"{'User' if msg.get('role') == 'user' else 'Assistant'}: {msg.get('content', '')}" 
-                            for msg in chat_history if isinstance(msg, dict)
-                        ])
-                        template = """You are a helpful AI assistant. Use the following pieces of context to answer the question at the end.\nIf you don't know the answer, just say that you don't know, don't try to make up an answer.\n\nContext:\n{context}\n\nChat History:\n{chat_history}\n\nQuestion: {question}\nAnswer: (Cite the source document if possible)"""
-                        prompt = PromptTemplate(
-                            template=template,
-                            input_variables=["context", "chat_history", "question"]
-                        )
-                        async def get_context(x):
-                            docs = await retriever.ainvoke(x["question"])
-                            context = "\n\n".join([
-                                f"[Source: {getattr(d, 'metadata', {}).get('source', 'unknown')}] {d.page_content}" for d in docs
-                            ])
-                            x["_retrieved_docs"] = docs
-                            return context
-                        rag_chain = (
-                            {
-                                "context": get_context,
-                                "chat_history": lambda x: x["chat_history"],
-                                "question": lambda x: x["question"]
-                            }
-                            | prompt
-                            | llm
-                            | StrOutputParser()
-                        )
-                        # Stream the response and collect sources
-                        full_response = ""
-                        sources = []
-                        try:
-                            input_obj = {"question": question, "chat_history": formatted_history}
-                            async for chunk in rag_chain.astream(input_obj):
-                                if chunk and isinstance(chunk, str):
-                                    full_response += chunk
-                                    try:
-                                        await manager.send_personal_message(
-                                            json.dumps({
-                                                "type": "chunk", 
-                                                "content": chunk
-                                            }),
-                                            websocket
-                                        )
-                                    except Exception as send_error:
-                                        logger.error(f"Error sending chunk: {str(send_error)}")
-                                        raise
-                            docs = input_obj.get("_retrieved_docs", [])
-                            sources = [getattr(d, 'metadata', {}) for d in docs]
-                            # Send completion message with sources
-                            await manager.send_personal_message(
-                                json.dumps({
-                                    "type": "complete", 
-                                    "content": full_response,
-                                    "sources": sources
-                                }),
-                                websocket
-                            )
-                        except asyncio.CancelledError:
-                            logger.info("Generation was cancelled by the client")
-                            await manager.send_personal_message(
-                                json.dumps({
-                                    "type": "status",
-                                    "status": "cancelled"
-                                }),
-                                websocket
-                            )
-                            raise
-                    except Exception as e:
-                        logger.error(f"Error processing query: {str(e)}", exc_info=True)
-                        await manager.send_personal_message(
-                            json.dumps({
-                                "type": "error", 
-                                "message": f"Error processing your request: {str(e)}"
-                            }),
-                            websocket
-                        )
-                
-                elif message.get("type") == "ping":
-                    # Handle ping/pong for keep-alive
-                    await manager.send_personal_message(
-                        json.dumps({"type": "pong"}),
-                        websocket
-                    )
-                
-                elif message.get("type") == "stop_generation":
-                    # Handle stop generation request
-                    logger.info("Received stop generation request")
-                    await manager.send_personal_message(
-                        json.dumps({"type": "status", "status": "stopped"}),
-                        websocket
-                    )
-
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=300)
             except asyncio.TimeoutError:
-                # Handle client timeout (no data received for a while)
-                logger.warning(f"Connection timeout for {websocket.client}")
+                logger.warning("WebSocket receive timeout", client=str(getattr(websocket, "client", "unknown")))
                 await manager.send_personal_message(
-                    json.dumps({
-                        "type": "error",
-                        "message": "Connection timeout"
-                    }),
-                    websocket
+                    json.dumps({"type": "error", "message": "Connection timeout"}),
+                    websocket,
                 )
                 break
-                
             except WebSocketDisconnect:
-                logger.info(f"Client {websocket.client} disconnected")
+                logger.info("WebSocket client disconnected", client=str(getattr(websocket, "client", "unknown")))
                 break
-                
-            except Exception as e:
-                logger.error(f"Unexpected error in WebSocket: {str(e)}", exc_info=True)
-                try:
+
+            try:
+                message = json.loads(data)
+            except json.JSONDecodeError:
+                logger.warning("Invalid JSON received", payload=data)
+                await manager.send_personal_message(
+                    json.dumps({"type": "error", "message": "Invalid JSON format"}),
+                    websocket,
+                )
+                continue
+
+            msg_type = message.get("type")
+
+            if msg_type == "ping":
+                await manager.send_personal_message(json.dumps({"type": "pong"}), websocket)
+                continue
+
+            if msg_type == "query":
+                question = (message.get("question") or "").strip()
+                if not question:
                     await manager.send_personal_message(
-                        json.dumps({
-                            "type": "error",
-                            "message": "An unexpected error occurred"
-                        }),
-                        websocket
+                        json.dumps({"type": "error", "message": "Question cannot be empty"}),
+                        websocket,
                     )
-                except:
-                    pass
-                break
-                
-    except Exception as e:
-        logger.error(f"WebSocket connection error: {str(e)}", exc_info=True)
+                    continue
+
+                chat_history = message.get("chat_history", [])
+                conversation_id = None
+                raw_conversation_id = message.get("conversation_id")
+                if raw_conversation_id is not None:
+                    try:
+                        conversation_id = int(raw_conversation_id)
+                    except (TypeError, ValueError):
+                        logger.warning(
+                            "Invalid conversation_id received",
+                            value=raw_conversation_id,
+                        )
+
+                existing_task = manager.get_task(websocket)
+                if existing_task and not existing_task.done():
+                    logger.info("Cancelling previous generation task before starting new query")
+                    existing_task.cancel()
+                    try:
+                        await existing_task
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        manager.clear_task(websocket)
+
+                task = asyncio.create_task(
+                    _process_websocket_query(
+                        websocket,
+                        question,
+                        chat_history,
+                        conversation_id,
+                    )
+                )
+                manager.set_task(websocket, task)
+                task.add_done_callback(lambda t, ws=websocket: manager.clear_task(ws))
+                continue
+
+            if msg_type == "stop_generation":
+                task = manager.get_task(websocket)
+                if task and not task.done():
+                    logger.info("Received stop generation request")
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        manager.clear_task(websocket)
+                else:
+                    await manager.send_personal_message(
+                        json.dumps({"type": "status", "status": "idle"}),
+                        websocket,
+                    )
+                continue
+
+            await manager.send_personal_message(
+                json.dumps({"type": "error", "message": "Unsupported message type"}),
+                websocket,
+            )
+
+    except Exception as exc:
+        logger.error("WebSocket connection error", error=str(exc), exc_info=True)
     finally:
-        # Ensure the connection is properly closed
         try:
+            task = manager.get_task(websocket)
+            if task and not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
             manager.disconnect(websocket)
-            logger.info(f"WebSocket connection closed for {getattr(websocket, 'client', 'unknown')}")
-        except Exception as e:
-            logger.error(f"Error closing WebSocket: {str(e)}")
+            logger.info("WebSocket connection closed", client=str(getattr(websocket, "client", "unknown")))
+        except Exception as exc:
+            logger.error("Error closing WebSocket", error=str(exc))
 
 # File management endpoints
-@app.get("/files")
-def list_files():
-    """List uploaded/ingested files with metadata and preview URLs."""
-    data_dir = os.path.join(os.path.dirname(__file__), '..', 'data', 'raw')
-    files = []
-    for fname in os.listdir(data_dir):
-        fpath = os.path.join(data_dir, fname)
-        if os.path.isfile(fpath):
-            files.append({
-                'name': fname,
-                'url': f"/files/preview/{fname}"
-            })
-    return {"files": files}
-
 @app.get("/files/preview/{filename}")
 def preview_file(filename: str):
     """Serve a file for preview (PDF, etc)."""
     data_dir = os.path.join(os.path.dirname(__file__), '..', 'data', 'raw')
-    fpath = os.path.join(data_dir, filename)
+    
+    # Sanitize filename to prevent directory traversal
+    safe_filename = os.path.basename(filename)
+    fpath = os.path.join(data_dir, safe_filename)
+    
+    # Ensure the resolved path is within the intended directory
+    if not os.path.abspath(fpath).startswith(os.path.abspath(data_dir)):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     if not os.path.isfile(fpath):
         raise HTTPException(status_code=404, detail="File not found")
+        
     return FileResponse(fpath)
 
-# Chat history/session management (stub)
-@app.get("/chats")
-def list_chats():
-    """List chat sessions (stub)."""
-    return {"chats": []}
+# Conversation Management Endpoints
+@app.get("/conversations", response_model=ConversationListResponse)
+async def list_conversations(user_id: str = "default_user", limit: int = 50):
+    """List conversations for a user."""
+    start_time = time.perf_counter()
+    try:
+        conversations = await app_service.list_conversations(user_id=user_id, limit=limit)
+        duration = time.perf_counter() - start_time
+        logger.info(
+            "Listed conversations",
+            user_id=user_id,
+            count=len(conversations),
+            duration=duration,
+        )
+        return ConversationListResponse(conversations=conversations, total=len(conversations))
+    except ConversationError as exc:
+        raise exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error("Unexpected error listing conversations", error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to list conversations") from exc
 
-@app.get("/chats/{chat_id}")
-def get_chat(chat_id: str):
-    """Get chat session by ID (stub)."""
-    return {"id": chat_id, "messages": []}
 
-# Feedback endpoint (stub)
-@app.post("/feedback")
-def submit_feedback(feedback: dict):
-    """Collect user feedback on answers (stub)."""
-    # Save feedback to disk or database (not implemented)
-    return {"status": "ok"}
+@app.get("/conversations/{conversation_id}", response_model=ConversationResponse)
+async def get_conversation(conversation_id: int):
+    """Get a specific conversation by ID."""
+    try:
+        conversation = await app_service.get_conversation(conversation_id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        logger.info("Retrieved conversation", conversation_id=conversation_id)
+        return ConversationResponse(**conversation)
+    except ConversationError as exc:
+        raise exc
+    except HTTPException as exc:
+        raise exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error(
+            "Unexpected error getting conversation",
+            conversation_id=conversation_id,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=500, detail="Failed to get conversation") from exc
+
+
+@app.post("/conversations", response_model=ConversationResponse)
+async def create_conversation(request: ConversationCreateRequest):
+    """Create a new conversation."""
+    try:
+        conversation = await app_service.create_conversation(request.title, request.user_id)
+
+        logger.info(
+            "Created new conversation",
+            conversation_id=conversation["id"],
+            title=request.title,
+        )
+
+        return ConversationResponse(**conversation)
+    except ConversationError as exc:
+        raise exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error("Unexpected error creating conversation", error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to create conversation") from exc
+
+
+@app.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: int):
+    """Delete a conversation."""
+    try:
+        success = await app_service.delete_conversation(conversation_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        logger.info("Deleted conversation", conversation_id=conversation_id)
+        return {"message": "Conversation deleted successfully"}
+    except ConversationError as exc:
+        raise exc
+    except HTTPException as exc:
+        raise exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.error(
+            "Unexpected error deleting conversation",
+            conversation_id=conversation_id,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=500, detail="Failed to delete conversation") from exc
+
 
 if __name__ == "__main__":
     uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)

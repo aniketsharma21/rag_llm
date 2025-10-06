@@ -1,68 +1,134 @@
-"""
-config.py
+"""Centralized configuration management using Pydantic settings."""
 
-Centralized configuration management for the RAG pipeline. Handles environment variables, YAML config loading, logging setup, API keys, and directory paths.
+from __future__ import annotations
 
-Usage:
-    Import settings and logger from this module for consistent configuration across the project.
-"""
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-import os
 import yaml
-import logging
 from dotenv import load_dotenv
+from pydantic import Field, computed_field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Load environment variables from .env file
+from src.logging_config import get_logger
+
+
 load_dotenv()
 
-# --- Logging Setup ---
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger("rag_llm")
+logger = get_logger(__name__)
 
-# --- YAML Config Loading ---
-CONFIG_YAML_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml")
-if os.path.exists(CONFIG_YAML_PATH):
-    with open(CONFIG_YAML_PATH, "r") as f:
-        yaml_config = yaml.safe_load(f)
-else:
-    yaml_config = {}
+_BASE_DIR_DEFAULT = Path(__file__).resolve().parent.parent
+_CONFIG_YAML_PATH_DEFAULT = _BASE_DIR_DEFAULT / "config.yaml"
 
-# --- API Keys ---
-# Securely load API keys from the environment
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or yaml_config.get("OPENAI_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY") or yaml_config.get("GROQ_API_KEY")
 
-# --- Paths ---
-# Base directory of the project
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+def _load_yaml_defaults(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
 
-# Data directories
-RAW_DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
-PROCESSED_DATA_DIR = os.path.join(BASE_DIR, "data", "processed")
-CHECKSUM_DIR = os.path.join(PROCESSED_DATA_DIR, "checksums")
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+        if not isinstance(data, dict):
+            logger.warning("config.yaml did not contain a mapping; ignoring contents")
+            return {}
+        return {str(key).lower(): value for key, value in data.items()}
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.warning("Failed to load config.yaml", error=str(exc))
+        return {}
 
-# Vector store persistence directory
-CHROMA_PERSIST_DIR = os.path.join(BASE_DIR, "chroma_store")
 
-# Prompts directory
-PROMPTS_DIR = os.path.join(BASE_DIR, "src", "prompts")
+_YAML_DEFAULTS = _load_yaml_defaults(_CONFIG_YAML_PATH_DEFAULT)
 
-# Model cache directory
-MODELS_CACHE_DIR = os.path.join(BASE_DIR, "models_cache")
 
-# --- Pipeline Settings ---
-# Settings for document chunking
-CHUNK_SIZE = yaml_config.get("CHUNK_SIZE", 1000)
-CHUNK_OVERLAP = yaml_config.get("CHUNK_OVERLAP", 150)
+class AppSettings(BaseSettings):
+    """Application configuration with environment and YAML overrides."""
 
-# Number of relevant chunks to retrieve for a query
-TOP_K = yaml_config.get("TOP_K", 5)
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-# --- Models ---
-# Names of the models to be used for LLM and embeddings
-LLM_MODEL = yaml_config.get("LLM_MODEL", "llama-3.1-8b-instant")  # Example: Using a Groq model
-EMBEDDING_MODEL = yaml_config.get("EMBEDDING_MODEL", "text-embedding-3-small")
+    base_dir: Path = Field(default=_BASE_DIR_DEFAULT)
+    config_yaml_path: Path = Field(default=_CONFIG_YAML_PATH_DEFAULT)
+
+    openai_api_key: Optional[str] = Field(default=_YAML_DEFAULTS.get("openai_api_key"))
+    groq_api_key: Optional[str] = Field(default=_YAML_DEFAULTS.get("groq_api_key"))
+
+    chunk_size: int = Field(default=_YAML_DEFAULTS.get("chunk_size", 1000))
+    chunk_overlap: int = Field(default=_YAML_DEFAULTS.get("chunk_overlap", 150))
+    top_k: int = Field(default=_YAML_DEFAULTS.get("top_k", 5))
+
+    llm_model: str = Field(default=_YAML_DEFAULTS.get("llm_model", "llama-3.1-8b-instant"))
+    embedding_model: str = Field(default=_YAML_DEFAULTS.get("embedding_model", "all-MiniLM-L6-v2"))
+    database_url: Optional[str] = Field(default=_YAML_DEFAULTS.get("database_url"))
+
+    @computed_field(return_type=str)
+    def raw_data_dir(self) -> str:
+        return str(self.base_dir / "data" / "raw")
+
+    @computed_field(return_type=str)
+    def processed_data_dir(self) -> str:
+        return str(self.base_dir / "data" / "processed")
+
+    @computed_field(return_type=str)
+    def checksum_dir(self) -> str:
+        return str(Path(self.processed_data_dir) / "checksums")
+
+    @computed_field(return_type=str)
+    def chroma_persist_dir(self) -> str:
+        return str(self.base_dir / "chroma_store")
+
+    @computed_field(return_type=str)
+    def prompts_dir(self) -> str:
+        return str(self.base_dir / "src" / "prompts")
+
+    @computed_field(return_type=str)
+    def models_cache_dir(self) -> str:
+        return str(self.base_dir / "models_cache")
+
+    @computed_field(return_type=str)
+    def database_url_sync(self) -> str:
+        if self.database_url:
+            return str(self.database_url)
+
+        database_path = self.base_dir / "conversations.db"
+        return f"sqlite:///{database_path}"
+
+    @computed_field(return_type=str)
+    def database_url_async(self) -> str:
+        url = self.database_url_sync
+        if url.startswith("sqlite+aiosqlite://"):
+            return url
+        if url.startswith("sqlite:///"):
+            return url.replace("sqlite:///", "sqlite+aiosqlite:///")
+        if url.startswith("sqlite:////"):
+            return url.replace("sqlite:////", "sqlite+aiosqlite:////")
+        return url
+
+
+@lru_cache()
+def get_settings() -> AppSettings:
+    settings = AppSettings()
+    logger.debug("Configuration loaded", base_dir=str(settings.base_dir))
+    return settings
+
+
+settings = get_settings()
+
+BASE_DIR = str(settings.base_dir)
+CONFIG_YAML_PATH = str(settings.config_yaml_path)
+
+RAW_DATA_DIR = settings.raw_data_dir
+PROCESSED_DATA_DIR = settings.processed_data_dir
+CHECKSUM_DIR = settings.checksum_dir
+CHROMA_PERSIST_DIR = settings.chroma_persist_dir
+PROMPTS_DIR = settings.prompts_dir
+MODELS_CACHE_DIR = settings.models_cache_dir
+
+OPENAI_API_KEY = settings.openai_api_key
+GROQ_API_KEY = settings.groq_api_key
+
+CHUNK_SIZE = settings.chunk_size
+CHUNK_OVERLAP = settings.chunk_overlap
+TOP_K = settings.top_k
+
+LLM_MODEL = settings.llm_model
+EMBEDDING_MODEL = settings.embedding_model

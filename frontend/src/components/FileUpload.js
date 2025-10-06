@@ -1,34 +1,104 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Button, Typography, LinearProgress, Snackbar, Alert, List, ListItem, ListItemText, IconButton, Dialog, DialogTitle, DialogContent, Tooltip } from '@mui/material';
-import UploadFileIcon from '@mui/icons-material/UploadFile';
-import PreviewIcon from '@mui/icons-material/Preview';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import { useConfig } from '../context/ConfigContext';
 
+/**
+ * A simple modal component for displaying a preview of a file.
+ * Currently supports PDF previews in an iframe.
+ * @param {object} props - The component props.
+ * @param {object} props.file - The file object to preview.
+ * @param {function} props.onClose - Callback function to close the modal.
+ */
+const PreviewModal = ({ file, onClose }) => {
+  if (!file) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center" onClick={onClose}>
+      <div className="bg-surface-light dark:bg-surface-dark rounded-lg shadow-xl w-11/12 h-5/6 flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+          <h3 className="text-lg font-semibold">{file.name}</h3>
+          <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+            <span className="material-icons">close</span>
+          </button>
+        </div>
+        <div className="flex-1 p-4">
+          {file.url && file.name.endsWith('.pdf') ? (
+            <iframe src={file.url} title="PDF Preview" width="100%" height="100%" />
+          ) : (
+            <p>No preview available for this file type.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * A simple notification "toast" component for displaying success or error messages.
+ * @param {object} props - The component props.
+ * @param {string} props.message - The message to display.
+ * @param {string} props.severity - The type of notification ('success' or 'error').
+ * @param {function} props.onClose - Callback function to close the notification.
+ */
+const Notification = ({ message, severity, onClose }) => {
+  if (!message) return null;
+
+  const severityClasses = {
+    success: 'bg-green-100 border-green-400 text-green-700 dark:bg-green-900 dark:border-green-600 dark:text-green-200',
+    error: 'bg-red-100 border-red-400 text-red-700 dark:bg-red-900 dark:border-red-600 dark:text-red-200',
+  };
+
+  return (
+    <div className={`fixed bottom-5 left-1/2 -translate-x-1/2 p-4 border rounded-md shadow-lg ${severityClasses[severity] || 'bg-gray-100 border-gray-400'}`}>
+      <div className="flex items-center">
+        <p>{message}</p>
+        <button onClick={onClose} className="ml-4 p-1 rounded-full hover:bg-gray-200/50">
+          <span className="material-icons text-base">close</span>
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * A component that provides a UI for uploading documents to the server.
+ * It includes file validation, upload progress, notifications, and a history of uploaded files.
+ */
 function FileUpload() {
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' });
-  const [uploadHistory, setUploadHistory] = useState([]);
-  const [previewFile, setPreviewFile] = useState(null);
+  // Component State
+  const [selectedFile, setSelectedFile] = useState(null); // The file currently selected by the user
+  const [uploading, setUploading] = useState(false); // Flag to indicate an active upload
+  const [uploadProgress, setUploadProgress] = useState(0); // Upload progress percentage
+  const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' }); // For showing success/error messages
+  const [uploadHistory, setUploadHistory] = useState([]); // List of previously uploaded files
+  const [previewFile, setPreviewFile] = useState(null); // The file to be shown in the preview modal
+  const [isDragOver, setIsDragOver] = useState(false); // Track drag over state for visual feedback
 
-  const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8000';
+  // Constants
+  const { apiBaseUrl } = useConfig();
   const MAX_SIZE_MB = 10;
   const ALLOWED_TYPES = ['application/pdf'];
 
+  /**
+   * Fetches the history of uploaded files from the backend when the component mounts
+   * or when a new file is successfully uploaded.
+   */
   useEffect(() => {
-    // Fetch upload history from backend
     async function fetchHistory() {
       try {
-        const res = await axios.get(`${API_BASE}/files`);
+        const res = await axios.get(`${apiBaseUrl}/files`);
         setUploadHistory(res.data.files || []);
       } catch (e) {
-        // Ignore error for now
+        console.error("Failed to fetch upload history:", e);
       }
     }
     fetchHistory();
-  }, [notification]); // refresh on upload
+  }, [notification.open]); // Refreshes history after a notification (i.e., after an upload attempt)
 
+  /**
+   * Validates the selected file based on type and size.
+   * @param {React.ChangeEvent<HTMLInputElement>} event - The file input change event.
+   */
   const handleFileChange = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -45,9 +115,11 @@ function FileUpload() {
     setSelectedFile(file);
   };
 
+  /**
+   * Handles the file upload process, including progress tracking and notifications.
+   */
   const handleUpload = async () => {
     if (!selectedFile) return;
-
     const formData = new FormData();
     formData.append('file', selectedFile);
 
@@ -55,10 +127,8 @@ function FileUpload() {
     setUploadProgress(0);
 
     try {
-      const response = await axios.post(`${API_BASE}/ingest`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+      const response = await axios.post(`${apiBaseUrl}/ingest`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
           setUploadProgress(percentCompleted);
@@ -73,83 +143,76 @@ function FileUpload() {
     }
   };
 
-  const handleCloseNotification = () => {
-    setNotification({ ...notification, open: false });
-  };
+  /**
+   * Effect to automatically hide notifications after a delay.
+   */
+  useEffect(() => {
+      if (notification.open) {
+          const timer = setTimeout(() => setNotification({ open: false, message: '', severity: 'info' }), 5000);
+          return () => clearTimeout(timer);
+      }
+  }, [notification.open]);
 
   return (
-    <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-        <Tooltip title="Choose a PDF file to upload">
-          <Button
-            variant="contained"
-            component="label"
-            startIcon={<UploadFileIcon />}
-            aria-label="Choose file"
-          >
-            Choose File
-            <input type="file" hidden onChange={handleFileChange} accept="application/pdf" />
-          </Button>
-        </Tooltip>
-        {selectedFile && (
-          <Typography sx={{ ml: 2 }}>{selectedFile.name}</Typography>
-        )}
-        <Tooltip title={selectedFile ? "Upload selected file" : "Select a file first"}>
-          <span>
-            <Button
-              variant="contained"
-              onClick={handleUpload}
-              disabled={!selectedFile || uploading}
-              sx={{ ml: 'auto' }}
-              aria-label="Upload file"
-            >
-              Upload
-            </Button>
-          </span>
-        </Tooltip>
-      </Box>
-      {uploading && (
-        <Box sx={{ width: '100%', mt: 2 }}>
-          <LinearProgress variant="determinate" value={uploadProgress} />
-        </Box>
-      )}
-      <Snackbar open={notification.open} autoHideDuration={6000} onClose={handleCloseNotification} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
-        <Alert onClose={handleCloseNotification} severity={notification.severity} sx={{ width: '100%' }}>
-          {notification.message}
-        </Alert>
-      </Snackbar>
-      {/* Upload history */}
-      <Box sx={{ mt: 2 }}>
-        <Typography variant="subtitle2">Uploaded Documents</Typography>
-        <List dense>
-          {uploadHistory.length === 0 && <ListItem><ListItemText primary="No files uploaded yet." /></ListItem>}
-          {uploadHistory.map((file, idx) => (
-            <ListItem key={idx} secondaryAction={
-              <Tooltip title="Preview document">
-                <span>
-                  <IconButton edge="end" aria-label="preview" onClick={() => setPreviewFile(file)}>
-                    <PreviewIcon />
-                  </IconButton>
-                </span>
-              </Tooltip>
-            }>
-              <ListItemText primary={file.name} />
-            </ListItem>
-          ))}
-        </List>
-      </Box>
-      {/* Document preview dialog */}
-      <Dialog open={!!previewFile} onClose={() => setPreviewFile(null)} maxWidth="md" fullWidth>
-        <DialogTitle>Preview: {previewFile?.name}</DialogTitle>
-        <DialogContent>
-          {previewFile?.url && previewFile.name.endsWith('.pdf') ? (
-            <iframe src={previewFile.url} title="PDF Preview" width="100%" height="600px" />
-          ) : (
-            <Typography>No preview available.</Typography>
-          )}
-        </DialogContent>
-      </Dialog>
-    </Box>
+    <div className="p-4 md:p-6 h-full overflow-y-auto">
+        <h2 className="text-2xl font-bold mb-4">Upload Documents</h2>
+        {/* Upload Section */}
+        <div className="bg-surface-light dark:bg-surface-dark p-6 rounded-lg shadow-md">
+            <div className="flex items-center space-x-4">
+                <label className="cursor-pointer bg-primary text-white px-4 py-2 rounded-md hover:bg-primary/90 flex items-center">
+                    <span className="material-icons mr-2">upload_file</span>
+                    Choose File
+                    <input type="file" className="hidden" onChange={handleFileChange} accept="application/pdf" />
+                </label>
+                {selectedFile && (
+                    <p className="text-text-secondary-light dark:text-text-secondary-dark">{selectedFile.name}</p>
+                )}
+                <button
+                    onClick={handleUpload}
+                    disabled={!selectedFile || uploading}
+                    className="ml-auto bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                >
+                    <span className="material-icons mr-2">cloud_upload</span>
+                    Upload
+                </button>
+            </div>
+            {uploading && (
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-4">
+                    <div className="bg-primary h-2.5 rounded-full" style={{ width: `${uploadProgress}%` }}></div>
+                </div>
+            )}
+        </div>
+
+        {/* Upload History Section */}
+        <div className="mt-8">
+            <h3 className="text-xl font-semibold mb-4">Uploaded Files</h3>
+            <div className="bg-surface-light dark:bg-surface-dark p-4 rounded-lg shadow-md">
+                <ul className="divide-y divide-gray-200 dark:divide-gray-700">
+                    {uploadHistory.length > 0 ? uploadHistory.map((file, idx) => (
+                        <li key={idx} className="py-3 flex items-center justify-between">
+                            <p className="text-sm font-medium">{file.name}</p>
+                            <button
+                                onClick={() => setPreviewFile(file)}
+                                className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700"
+                                aria-label="Preview document"
+                            >
+                                <span className="material-icons text-base">visibility</span>
+                            </button>
+                        </li>
+                    )) : (
+                        <p className="text-text-secondary-light dark:text-text-secondary-dark text-center py-4">No files uploaded yet.</p>
+                    )}
+                </ul>
+            </div>
+        </div>
+
+        <PreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+        <Notification
+            message={notification.message}
+            severity={notification.severity}
+            onClose={() => setNotification({ open: false, message: '', severity: 'info' })}
+        />
+    </div>
   );
 }
 

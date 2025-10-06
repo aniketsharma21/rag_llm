@@ -1,91 +1,76 @@
-import React, { useState } from 'react';
-import { Box, Button, Typography, Divider, Tooltip } from '@mui/material';
-import Message from './Message';
-import DownloadIcon from '@mui/icons-material/Download';
+import React, { useEffect, useRef } from 'react';
 
-function exportChat(messages, format = 'csv') {
-  if (format === 'csv') {
-    const csv = messages.map(m => `"${m.sender}","${m.text.replace(/"/g, '""')}"`).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'chat_history.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-  } else if (format === 'txt') {
-    const txt = messages.map(m => `${m.sender}: ${m.text}`).join('\n');
-    const blob = new Blob([txt], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'chat_history.txt';
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-}
+import EnhancedMessage from './EnhancedMessage';
+import { useConversationStore } from '../context/ConversationStoreContext';
+import { useWebSocket } from '../context/WebSocketContext';
+import Card, { CardContent } from './ui/Card';
+import Button from './ui/Button';
 
-function ChatWindow({ messages, isLoading, sessions = [], currentSessionId, onFeedback }) {
-  const [visibleCount, setVisibleCount] = useState(20);
-  const handleLoadMore = () => setVisibleCount((c) => c + 20);
+/**
+ * Displays the list of messages in the main chat area.
+ * It maps over the messages array and renders a message component for each entry
+ * while showing a streaming indicator based on the WebSocket state.
+ */
+const TypingIndicator = ({ onStop }) => (
+  <div className="flex items-center space-x-3">
+    <Card className="max-w-2xl bg-surface-light dark:bg-surface-dark">
+      <CardContent className="flex items-center space-x-3">
+        <div className="typing-indicator">
+          <span />
+          <span />
+          <span />
+        </div>
+        <span className="text-sm text-gray-600 dark:text-gray-300">AI is responding...</span>
+      </CardContent>
+    </Card>
+    <Button
+      variant="ghost"
+      size="sm"
+      className="text-red-600 border border-red-200 dark:border-red-500/40 hover:bg-red-50 dark:hover:bg-red-500/10"
+      onClick={onStop}
+    >
+      Stop
+    </Button>
+  </div>
+);
 
-  // Group messages by session if sessions provided, else show all
-  const grouped = sessions.length > 0
-    ? sessions.map(session => ({
-        ...session,
-        messages: messages.filter(m => m.sessionId === session.id)
-      }))
-    : [{ id: 'default', title: 'Current Chat', messages }];
+const ChatWindow = () => {
+  const { messages } = useConversationStore();
+  const { isLoading, handleFeedback, stopGeneration } = useWebSocket();
+  const messagesEndRef = useRef(null);
+
+  /**
+   * Automatically scrolls the chat window to the bottom
+   * whenever a new message is added.
+   */
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   return (
-    <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 3 }} role="log" aria-label="Chat messages">
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-        <Tooltip title="Export chat as CSV">
-          <span>
-            <Button
-              variant="outlined"
-              startIcon={<DownloadIcon />}
-              onClick={() => exportChat(messages, 'csv')}
-              size="small"
-              aria-label="Export chat"
-            >
-              Export Chat
-            </Button>
-          </span>
-        </Tooltip>
-      </Box>
-      {grouped.map((group, idx) => (
-        <Box key={group.id} sx={{ mb: 4 }}>
-          {sessions.length > 0 && (
-            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-              {group.title || `Session ${idx + 1}`}
-            </Typography>
-          )}
-          {/* Pagination: show only the last visibleCount messages */}
-          {group.messages.length > visibleCount && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
-              <Button onClick={handleLoadMore} size="small" variant="text" aria-label="Load more messages">
-                Load More
-              </Button>
-            </Box>
-          )}
-          {group.messages.slice(-visibleCount).map((msg, i) => (
-            <Message key={i} {...msg} />
-          ))}
-          {idx < grouped.length - 1 && <Divider sx={{ my: 2 }} />}
-        </Box>
+    <main className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 relative" id="chat-window">
+      {messages.map((msg) => (
+        <EnhancedMessage
+          key={msg.id || msg.timestamp}
+          id={msg.id}
+          sender={msg.sender}
+          text={msg.text}
+          sources={msg.sources}
+          onFeedback={handleFeedback}
+          timestamp={msg.timestamp || new Date().toISOString()}
+          jobStatus={msg.jobStatus}
+          isProcessing={msg.isProcessing}
+          details={msg.details}
+        />
       ))}
-      {isLoading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}>
-          <div className="typing-indicator">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
-        </Box>
+      {/* Show typing indicator only when loading and the last message was from the user */}
+      {isLoading && messages[messages.length - 1]?.sender === 'user' && (
+        <TypingIndicator onStop={stopGeneration} />
       )}
-    </Box>
+      {/* Empty div to act as a reference for scrolling to the bottom */}
+      <div ref={messagesEndRef} />
+    </main>
   );
-}
+};
 
 export default ChatWindow;
