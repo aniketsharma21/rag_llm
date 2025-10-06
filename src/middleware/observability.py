@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from time import perf_counter
-from typing import Callable
+from typing import Callable, Dict
 from uuid import uuid4
 
 from fastapi import FastAPI, Response
@@ -32,6 +32,36 @@ REQUEST_LATENCY = Histogram(
 REQUEST_IN_PROGRESS = Gauge(
     "rag_http_requests_in_progress",
     "Number of HTTP requests currently being processed",
+)
+
+RAG_RETRIEVAL_LATENCY = Histogram(
+    "rag_retrieval_duration_seconds",
+    "Time spent retrieving documents for RAG queries",
+    ["mode"],
+)
+
+RAG_RETRIEVED_DOCUMENTS = Histogram(
+    "rag_retrieved_documents_count",
+    "Number of documents returned from retrieval",
+    ["mode"],
+)
+
+RAG_GENERATION_LATENCY = Histogram(
+    "rag_generation_duration_seconds",
+    "Time spent generating responses with the LLM",
+    ["provider", "model"],
+)
+
+RAG_TOKEN_USAGE = Counter(
+    "rag_generation_tokens_total",
+    "Token usage reported by the LLM provider",
+    ["provider", "model", "token_type"],
+)
+
+RAG_ERRORS = Counter(
+    "rag_pipeline_errors_total",
+    "Count of errors emitted during the RAG pipeline",
+    ["component", "exception_type"],
 )
 
 
@@ -98,3 +128,47 @@ def setup_observability(app: FastAPI) -> None:
     app.add_api_route("/metrics", metrics, include_in_schema=False)
     app.state.metrics_route_registered = True
     app.state.observability_configured = True
+
+
+def observe_rag_retrieval(*, duration_seconds: float, document_count: int, mode: str) -> None:
+    """Record retrieval metrics for observability dashboards."""
+
+    sanitized_mode = mode or "unknown"
+    try:
+        RAG_RETRIEVAL_LATENCY.labels(sanitized_mode).observe(max(duration_seconds, 0.0))
+        RAG_RETRIEVED_DOCUMENTS.labels(sanitized_mode).observe(max(document_count, 0))
+    except Exception:  # pragma: no cover - metrics should not break business logic
+        return
+
+
+def observe_rag_generation(
+    *,
+    provider: str,
+    model: str,
+    duration_seconds: float,
+    token_usage: Dict[str, int] | None = None,
+) -> None:
+    """Record LLM generation metrics including latency and token usage."""
+
+    sanitized_provider = (provider or "unknown").lower()
+    sanitized_model = model or "unknown"
+    try:
+        RAG_GENERATION_LATENCY.labels(sanitized_provider, sanitized_model).observe(max(duration_seconds, 0.0))
+        if token_usage:
+            for token_type, count in token_usage.items():
+                if count is None:
+                    continue
+                RAG_TOKEN_USAGE.labels(sanitized_provider, sanitized_model, token_type).inc(max(int(count), 0))
+    except Exception:  # pragma: no cover - defensive metric handling
+        return
+
+
+def increment_rag_error(*, component: str, exception_type: str) -> None:
+    """Increment error counter for a RAG component."""
+
+    sanitized_component = component or "unknown"
+    sanitized_exception = exception_type or "UnknownException"
+    try:
+        RAG_ERRORS.labels(sanitized_component, sanitized_exception).inc()
+    except Exception:  # pragma: no cover - ensure metrics never raise
+        return

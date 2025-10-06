@@ -15,6 +15,7 @@ const ConversationStoreContext = createContext(null);
 const THEME_KEY = 'theme';
 const SETTINGS_KEY = 'settings';
 const DEFAULT_SETTINGS = { model: 'llama-3.1-70b-versatile', numDocs: 5 };
+const CONVERSATIONS_CACHE_MS = 60 * 1000;
 
 const readJsonValue = (key, fallback) => {
   if (typeof window === 'undefined') {
@@ -52,9 +53,12 @@ export const ConversationStoreProvider = ({ children }) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeJobs, setActiveJobs] = useState({});
   const [connectionNotice, setConnectionNotice] = useState(null);
+  const [isConversationsLoading, setIsConversationsLoading] = useState(false);
 
   const jobPollersRef = useRef({});
   const isUnmountedRef = useRef(false);
+  const conversationsCacheRef = useRef({ timestamp: 0, data: [] });
+  const isFetchingConversationsRef = useRef(false);
 
   const addMessage = useCallback((message) => {
     setMessages((prev) => [...prev, message]);
@@ -98,6 +102,67 @@ export const ConversationStoreProvider = ({ children }) => {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   }, []);
 
+  const applyConversationCache = useCallback((data) => {
+    const normalized = Array.isArray(data) ? data : [];
+    const stamped = { timestamp: Date.now(), data: normalized };
+    conversationsCacheRef.current = stamped;
+    setConversations(() => normalized);
+    return normalized;
+  }, []);
+
+  const fetchConversations = useCallback(
+    async ({ force = false } = {}) => {
+      if (!apiBaseUrl) {
+        return conversationsCacheRef.current.data;
+      }
+
+      const cache = conversationsCacheRef.current;
+      const now = Date.now();
+      if (
+        !force &&
+        cache.data.length > 0 &&
+        now - cache.timestamp < CONVERSATIONS_CACHE_MS
+      ) {
+        if (conversations.length === 0) {
+          applyConversationCache(cache.data);
+        }
+        return cache.data;
+      }
+
+      if (isFetchingConversationsRef.current) {
+        return cache.data;
+      }
+
+      isFetchingConversationsRef.current = true;
+      setIsConversationsLoading(true);
+      try {
+        const response = await fetch(`${apiBaseUrl}/conversations`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch conversations (${response.status})`);
+        }
+        const payload = await response.json().catch(() => ({}));
+        const data = Array.isArray(payload?.conversations) ? payload.conversations : [];
+        return applyConversationCache(data);
+      } catch (error) {
+        console.error('Failed to fetch conversations', error);
+        throw error;
+      } finally {
+        isFetchingConversationsRef.current = false;
+        setIsConversationsLoading(false);
+      }
+    },
+    [apiBaseUrl, applyConversationCache, conversations.length],
+  );
+
+  const refreshConversations = useCallback(async () => {
+    try {
+      return await fetchConversations({ force: true });
+    } catch (error) {
+      appendSystemMessage('Unable to refresh conversations. Please try again later.');
+      return conversationsCacheRef.current.data;
+    }
+  }, [appendSystemMessage, fetchConversations]);
+
   useEffect(() => {
     if (typeof document !== 'undefined') {
       document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -120,6 +185,12 @@ export const ConversationStoreProvider = ({ children }) => {
     }
   }, [settings]);
 
+  useEffect(() => {
+    fetchConversations().catch((error) => {
+      console.warn('Initial conversation fetch failed', error);
+    });
+  }, [fetchConversations]);
+
   const saveCurrentConversation = useCallback(() => {
     if (messages.length === 0 || currentConversationId !== null) {
       return;
@@ -131,7 +202,11 @@ export const ConversationStoreProvider = ({ children }) => {
       title,
       messages: [...messages],
     };
-    setConversations((prev) => [newConversation, ...prev]);
+    setConversations((prev) => {
+      const updated = [newConversation, ...prev];
+      conversationsCacheRef.current = { timestamp: Date.now(), data: updated };
+      return updated;
+    });
   }, [messages, currentConversationId]);
 
   const startNewConversation = useCallback(() => {
@@ -383,6 +458,8 @@ export const ConversationStoreProvider = ({ children }) => {
       selectConversation,
       searchQuery,
       setSearchQuery,
+      refreshConversations,
+      isConversationsLoading,
 
       // Theme & settings
       theme,
@@ -416,6 +493,8 @@ export const ConversationStoreProvider = ({ children }) => {
       startNewConversation,
       selectConversation,
       searchQuery,
+      refreshConversations,
+      isConversationsLoading,
       theme,
       toggleTheme,
       settings,

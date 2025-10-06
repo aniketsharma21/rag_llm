@@ -1,80 +1,222 @@
-"""
-llm.py
+"""Enhanced LLM and RAG orchestration utilities."""
 
-Enhanced LLM management for the RAG pipeline with hybrid retrieval and advanced prompting.
-Integrates with hybrid retrieval system and enhanced prompt templates for better responses.
-
-Features:
-- Groq LLM integration with error handling
-- Enhanced RAG chain with hybrid retrieval
-- Source attribution and confidence scoring
-- Multiple prompt templates for different query types
-- Conversation context management
-
-Usage:
-    Use get_llm() to obtain a ready-to-use LLM instance.
-    Use EnhancedRAGChain for advanced RAG functionality with hybrid retrieval.
-"""
+from __future__ import annotations
 
 import os
-from urllib.parse import quote
-from typing import List, Dict, Any, Optional, AsyncGenerator
-from langchain_groq import ChatGroq
-from langchain.schema import Document
-from langchain.chains import LLMChain
-from src.config import GROQ_API_KEY, LLM_MODEL
-from src.logging_config import get_logger
-from src.exceptions import LLMError, ConfigurationError
-from src.retrieval import HybridRetriever, AdvancedRetriever
-from src.prompt_templates import get_enhanced_prompt, prompt_manager
-import json
 import re
+import time
+from threading import Lock
+from typing import Any, Callable, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
+from groq import Groq
+from langchain.schema import Document
+from langchain_groq import ChatGroq
 
-SUPERSCRIPT_MAP = {
-    "0": "\u2070",
-    "1": "\u00B9",
-    "2": "\u00B2",
-    "3": "\u00B3",
-    "4": "\u2074",
-    "5": "\u2075",
-    "6": "\u2076",
-    "7": "\u2077",
-    "8": "\u2078",
-    "9": "\u2079",
-}
+try:  # Optional dependency
+    from langchain_openai import ChatOpenAI
+except ImportError:  # pragma: no cover - optional provider
+    ChatOpenAI = None
+
+from src.config import (
+    GROQ_API_KEY,
+    OPENAI_API_KEY,
+    LLM_MAX_OUTPUT_TOKENS,
+    LLM_MAX_RETRIES,
+    LLM_MODEL,
+    LLM_PROVIDER,
+    LLM_REQUEST_TIMEOUT,
+    LLM_TEMPERATURE,
+    RETRIEVER_KEYWORD_WEIGHT,
+    RETRIEVER_K,
+    RETRIEVER_SEMANTIC_WEIGHT,
+)
+from src.exceptions import ConfigurationError, LLMError
+from src.logging_config import get_logger
+from src.middleware.observability import (
+    increment_rag_error,
+    observe_rag_generation,
+    observe_rag_retrieval,
+)
+from src.prompt_templates import get_enhanced_prompt, prompt_manager
+from src.retrieval import AdvancedRetriever, HybridRetriever
+from src.utils.source_formatting import (
+    normalize_source_payload,
+    replace_bracket_citations,
+)
 
 
 logger = get_logger(__name__)
 
-def get_llm():
-    """
-    Initializes and returns the Groq LLM instance for text generation.
 
-    Raises:
-        ConfigurationError: If GROQ_API_KEY is missing.
-        LLMError: If LLM initialization fails.
+class LLMProviderRegistry:
+    """Registry for managing LLM provider factories and health checks."""
 
-    Returns:
-        ChatGroq instance: A configured instance of the ChatGroq class for generating text.
-    """
-    if not GROQ_API_KEY:
-        logger.error("GROQ_API_KEY not found", model=LLM_MODEL)
-        raise ConfigurationError("GROQ_API_KEY not found. Please set it in your .env file.", 
-                               {"model": LLM_MODEL})
+    def __init__(self) -> None:
+        self._factories: Dict[str, Callable[[Dict[str, Any]], Any]] = {}
+        self._health_checks: Dict[str, Callable[[Dict[str, Any]], None]] = {}
+        self._cache: Dict[Tuple[str, Tuple[Tuple[str, Any], ...]], Any] = {}
+        self._lock = Lock()
+
+    def register(
+        self,
+        name: str,
+        *,
+        factory: Callable[[Dict[str, Any]], Any],
+        health_check: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> None:
+        self._factories[name.lower()] = factory
+        if health_check:
+            self._health_checks[name.lower()] = health_check
+
+    def create(self, name: str, options: Dict[str, Any]) -> Any:
+        clean_options = tuple(sorted((key, value) for key, value in options.items() if value is not None))
+        key = (name.lower(), clean_options)
+        with self._lock:
+            cached = self._cache.get(key)
+            if cached:
+                return cached
+
+        factory = self._factories.get(name.lower())
+        if not factory:
+            raise ConfigurationError(
+                f"Unsupported LLM provider '{name}'.",
+                {"provider": name, "available_providers": list(self._factories)},
+            )
+
+        try:
+            instance = factory(options)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Failed to create LLM instance", provider=name, error=str(exc))
+            raise LLMError(
+                f"Failed to create LLM instance: {exc}",
+                {"provider": name, "options": options},
+            ) from exc
+
+        with self._lock:
+            self._cache[key] = instance
+        return instance
+
+    def run_health_check(self, name: str, options: Dict[str, Any]) -> None:
+        health_check = self._health_checks.get(name.lower())
+        if not health_check:
+            return
+        health_check(options)
+
+
+registry = LLMProviderRegistry()
+
+
+def _create_groq_llm(options: Dict[str, Any]) -> ChatGroq:
+    api_key = options.get("api_key") or GROQ_API_KEY
+    if not api_key:
+        raise ConfigurationError("GROQ_API_KEY not found.", {"provider": "groq"})
+    params = {
+        "api_key": api_key,
+        "model": options.get("model", LLM_MODEL),
+        "temperature": options.get("temperature", LLM_TEMPERATURE),
+        "max_tokens": options.get("max_output_tokens", LLM_MAX_OUTPUT_TOKENS),
+        "max_retries": options.get("max_retries", LLM_MAX_RETRIES),
+    }
+    timeout = options.get("request_timeout")
+    if timeout:
+        params["request_timeout"] = timeout
+    return ChatGroq(**params)
+
+
+def _groq_health_check(options: Dict[str, Any]) -> None:
+    api_key = options.get("api_key") or GROQ_API_KEY
+    if not api_key:
+        raise ConfigurationError("GROQ_API_KEY not found.", {"provider": "groq"})
+    client = Groq(api_key=api_key)
     try:
-        llm = ChatGroq(
-            model=LLM_MODEL,
-            api_key=GROQ_API_KEY,
-            temperature=0.1,  # Lower temperature for more consistent responses
-            max_tokens=2048   # Reasonable token limit
+        client.models.list()
+    except Exception as exc:  # pragma: no cover - depends on network
+        logger.error("Groq health check failed", error=str(exc))
+        raise LLMError("Groq health check failed", {"error": str(exc)}) from exc
+
+
+def _create_openai_llm(options: Dict[str, Any]):  # pragma: no cover - optional dependency
+    if ChatOpenAI is None:
+        raise ConfigurationError(
+            "OpenAI provider requested but langchain-openai is not installed.",
+            {"provider": "openai"},
         )
-        logger.info("Successfully initialized Groq LLM", model=LLM_MODEL)
-        return llm
-    except Exception as e:
-        logger.error("Failed to initialize Groq LLM", model=LLM_MODEL, error=str(e))
-        raise LLMError(f"Failed to initialize Groq LLM: {str(e)}", 
-                      {"model": LLM_MODEL, "error": str(e)})
+    api_key = options.get("api_key") or OPENAI_API_KEY
+    if not api_key:
+        raise ConfigurationError("OPENAI_API_KEY not found.", {"provider": "openai"})
+    return ChatOpenAI(
+        api_key=api_key,
+        model=options.get("model", LLM_MODEL),
+        temperature=options.get("temperature", LLM_TEMPERATURE),
+        max_tokens=options.get("max_output_tokens", LLM_MAX_OUTPUT_TOKENS),
+        max_retries=options.get("max_retries", LLM_MAX_RETRIES),
+        timeout=options.get("request_timeout") or LLM_REQUEST_TIMEOUT,
+    )
+
+
+def _openai_health_check(options: Dict[str, Any]) -> None:  # pragma: no cover
+    if ChatOpenAI is None:
+        raise ConfigurationError(
+            "OpenAI provider requested but langchain-openai is not installed.",
+            {"provider": "openai"},
+        )
+    api_key = options.get("api_key") or OPENAI_API_KEY
+    if not api_key:
+        raise ConfigurationError("OPENAI_API_KEY not found.", {"provider": "openai"})
+    client = ChatOpenAI(api_key=api_key, model="gpt-3.5-turbo")
+    client.invoke("ping")
+
+
+registry.register("groq", factory=_create_groq_llm, health_check=_groq_health_check)
+registry.register("openai", factory=_create_openai_llm, health_check=_openai_health_check)
+
+
+def get_llm(
+    *,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    temperature: Optional[float] = None,
+    max_output_tokens: Optional[int] = None,
+    request_timeout: Optional[int] = None,
+    api_key: Optional[str] = None,
+    max_retries: Optional[int] = None,
+) -> Any:
+    """Return a configured LLM instance using the registry and caching."""
+
+    options = {
+        "model": model or LLM_MODEL,
+        "temperature": temperature if temperature is not None else LLM_TEMPERATURE,
+        "max_output_tokens": max_output_tokens or LLM_MAX_OUTPUT_TOKENS,
+    }
+    if api_key:
+        options["api_key"] = api_key
+    timeout = request_timeout if request_timeout is not None else LLM_REQUEST_TIMEOUT
+    if timeout:
+        options["request_timeout"] = timeout
+    retries = max_retries if max_retries is not None else LLM_MAX_RETRIES
+    if retries is not None:
+        options["max_retries"] = retries
+
+    selected_provider = (provider or LLM_PROVIDER).lower()
+    logger.debug(
+        "Creating LLM instance",
+        provider=selected_provider,
+        model=options["model"],
+        temperature=options["temperature"],
+    )
+    return registry.create(selected_provider, options)
+
+
+def run_llm_health_check() -> None:
+    """Validate configured LLM provider credentials at startup."""
+
+    options = {
+        "model": LLM_MODEL,
+        "temperature": LLM_TEMPERATURE,
+        "max_output_tokens": LLM_MAX_OUTPUT_TOKENS,
+    }
+    registry.run_health_check(LLM_PROVIDER, options)
 
 
 class EnhancedRAGChain:
@@ -82,7 +224,15 @@ class EnhancedRAGChain:
     Enhanced RAG chain with hybrid retrieval, source attribution, and advanced prompting.
     """
     
-    def __init__(self, vector_store, documents: List[Document]):
+    def __init__(
+        self,
+        vector_store,
+        documents: List[Document],
+        *,
+        retriever_semantic_weight: float = RETRIEVER_SEMANTIC_WEIGHT,
+        retriever_keyword_weight: float = RETRIEVER_KEYWORD_WEIGHT,
+        retriever_k: int = RETRIEVER_K,
+    ):
         """
         Initialize the enhanced RAG chain.
         
@@ -90,14 +240,21 @@ class EnhancedRAGChain:
             vector_store: ChromaDB vector store instance
             documents: List of processed documents for BM25 retrieval
         """
-        self.llm = get_llm()
+        self.llm_provider = LLM_PROVIDER
+        self.llm_model = LLM_MODEL
         self.vector_store = vector_store
         self.documents = documents
         self.conversation_history: List[Dict[str, Any]] = []
 
         # Initialize hybrid retriever
         try:
-            self.retriever = HybridRetriever(vector_store, documents)
+            self.retriever = HybridRetriever(
+                vector_store,
+                documents,
+                semantic_weight=retriever_semantic_weight,
+                keyword_weight=retriever_keyword_weight,
+                k=retriever_k,
+            )
             logger.info("Initialized hybrid retriever", num_documents=len(documents))
         except Exception as e:
             logger.error("Failed to initialize hybrid retriever", error=str(e))
@@ -106,7 +263,13 @@ class EnhancedRAGChain:
         
         # Initialize advanced retriever for context-aware queries
         try:
-            self.advanced_retriever = AdvancedRetriever(vector_store, documents)
+            self.advanced_retriever = AdvancedRetriever(
+                vector_store,
+                documents,
+                semantic_weight=retriever_semantic_weight,
+                keyword_weight=retriever_keyword_weight,
+                k=retriever_k,
+            )
             logger.info("Initialized advanced retriever")
         except Exception as e:
             logger.warning("Failed to initialize advanced retriever", error=str(e))
@@ -120,6 +283,8 @@ class EnhancedRAGChain:
         include_sources: bool = True,
         chat_history: Optional[List[Dict[str, Any]]] = None,
         conversation_context: bool = True,
+        retriever_overrides: Optional[Dict[str, Any]] = None,
+        llm_overrides: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Process a query using enhanced RAG with hybrid retrieval.
@@ -146,18 +311,26 @@ class EnhancedRAGChain:
                 use_context=use_context,
             )
             
-            # Retrieve relevant documents
+            retriever = self._select_retriever(retriever_overrides)
+
+            retrieval_start = time.perf_counter()
             if use_context and self.advanced_retriever:
                 history_strings = self._prepare_history(history)
                 documents = self.advanced_retriever.retrieve_with_context(
-                    question, 
+                    question,
                     history_strings,
-                    k=k
+                    k=retriever_overrides.get("k") if retriever_overrides else k,
                 )
             else:
-                documents = self.retriever.retrieve(question, k=k)
-            
-            logger.info("Retrieved documents", count=len(documents))
+                documents = retriever.retrieve(question, k=retriever_overrides.get("k") if retriever_overrides else k)
+
+            retrieval_duration = time.perf_counter() - retrieval_start
+            observe_rag_retrieval(
+                duration_seconds=retrieval_duration,
+                document_count=len(documents),
+                mode="context" if use_context and self.advanced_retriever else "hybrid",
+            )
+            logger.info("Retrieved documents", count=len(documents), duration=round(retrieval_duration, 4))
             
             # Auto-select template if not specified
             if template_type is None:
@@ -173,16 +346,29 @@ class EnhancedRAGChain:
                 chat_history=history if use_context else None,
             )
             
-            # Generate response
-            response = self.llm.invoke(prompt)
-            answer = response.content if hasattr(response, 'content') else str(response)
+            llm = self._resolve_llm(llm_overrides)
+
+            generation_start = time.perf_counter()
+            response = llm.invoke(prompt)
+            generation_duration = time.perf_counter() - generation_start
+            answer = response.content if hasattr(response, "content") else str(response)
+            answer = replace_bracket_citations(answer)
             
             # Extract source information and confidence scores
-            sources = self._extract_source_info(documents, answer) if include_sources else []
-            answer = self._apply_superscript_citations(answer, sources)
+            sources = self._extract_source_info(documents) if include_sources else []
             
             # Calculate confidence score
             confidence_score = self._calculate_confidence_score(answer, documents)
+
+            token_usage = {}
+            if hasattr(response, "response_metadata"):
+                token_usage = response.response_metadata.get("token_usage", {})
+            observe_rag_generation(
+                provider=self.llm_provider,
+                model=self.llm_model,
+                duration_seconds=generation_duration,
+                token_usage=token_usage,
+            )
             
             result = {
                 "answer": answer,
@@ -205,7 +391,11 @@ class EnhancedRAGChain:
             
         except Exception as e:
             logger.error("RAG query failed", question=question, error=str(e))
-            raise LLMError(f"RAG query failed: {str(e)}", {"question": question, "error": str(e)})
+            increment_rag_error(component="rag_chain", exception_type=e.__class__.__name__)
+            raise LLMError(
+                f"RAG query failed: {str(e)}",
+                {"question": question, "error": str(e)},
+            )
     
     def _prepare_history(self, chat_history: List[Dict[str, Any]]) -> List[str]:
         """Convert structured chat history into flat strings for the retriever."""
@@ -224,148 +414,108 @@ class EnhancedRAGChain:
             history_strings.append(f"{prefix}{content}")
         return history_strings
 
-    def _extract_source_info(self, documents: List[Document], answer: str) -> List[Dict[str, Any]]:
-        """Aggregate chunk metadata into document-level source entries."""
-        grouped_sources: Dict[str, Dict[str, Any]] = {}
-        insertion_order: List[str] = []
+    def _extract_source_info(self, documents: List[Document]) -> List[Dict[str, Any]]:
+        """Aggregate chunk metadata into normalized source payloads."""
+        grouped: Dict[str, Dict[str, Any]] = {}
 
         for doc in documents:
             metadata = dict(getattr(doc, "metadata", {}) or {})
             raw_path = metadata.get("raw_file_path") or metadata.get("source")
-            display_name = metadata.get("source_display_name")
-            if not display_name and raw_path:
-                display_name = os.path.basename(raw_path)
+            key = metadata.get("document_id") or raw_path or metadata.get("source_display_name") or str(id(doc))
+            entry = grouped.setdefault(
+                key,
+                {
+                    "content": doc.page_content,
+                    "metadata": metadata,
+                    "chunks": [],
+                },
+            )
+            entry["chunks"].append(doc)
 
-            source_key = metadata.get("document_id") or raw_path or display_name or str(id(doc))
-
-            preview_url = metadata.get("preview_url")
-            if not preview_url and raw_path:
-                filename = os.path.basename(raw_path)
-                if filename:
-                    preview_url = f"/files/preview/{quote(filename)}"
-
-            page_number = metadata.get("page_number")
-            if page_number is None and isinstance(metadata.get("page"), int):
-                page_number = metadata["page"] + 1
-
-            snippet = metadata.get("snippet") or (doc.page_content or "")
-            if snippet:
-                snippet = snippet.strip()
-                if len(snippet) > 320:
-                    truncated = snippet[:320].rsplit(" ", 1)[0]
-                    snippet = f"{truncated}…" if truncated else snippet[:320] + "…"
-
-            relevance = self._calculate_relevance_score(doc, answer)
-
-            entry = grouped_sources.get(source_key)
-            if not entry:
-                entry = {
-                    "raw_file_path": raw_path,
-                    "source_display_name": display_name or "Document",
-                    "source_display_path": metadata.get("source_display_path"),
-                    "preview_url": preview_url,
-                    "relevance_score": relevance,
-                    "snippet": snippet,
-                    "snippet_score": relevance if snippet else -1,
-                    "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
-                    "metadata": dict(metadata),
-                    "page_numbers": set([page_number]) if page_number is not None else set(),
-                    "chunk_count": 1,
-                    "bm25_score": metadata.get("bm25_score"),
-                    "retrieval_rank": metadata.get("retrieval_rank"),
-                }
-                grouped_sources[source_key] = entry
-                insertion_order.append(source_key)
-            else:
-                entry["chunk_count"] += 1
-                entry["relevance_score"] = max(entry["relevance_score"], relevance)
-                if preview_url and not entry.get("preview_url"):
-                    entry["preview_url"] = preview_url
-                if page_number is not None:
-                    entry["page_numbers"].add(page_number)
-                if snippet and (entry["snippet"] is None or relevance > entry.get("snippet_score", -1)):
-                    entry["snippet"] = snippet
-                    entry["snippet_score"] = relevance
-                    entry["content"] = doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
-                if metadata.get("bm25_score") is not None:
-                    if entry["bm25_score"] is None or metadata["bm25_score"] > entry["bm25_score"]:
-                        entry["bm25_score"] = metadata["bm25_score"]
-                if metadata.get("retrieval_rank") is not None:
-                    if entry["retrieval_rank"] is None or metadata["retrieval_rank"] < entry["retrieval_rank"]:
-                        entry["retrieval_rank"] = metadata["retrieval_rank"]
-
-        aggregated_sources: List[Dict[str, Any]] = []
-        for index, key in enumerate(insertion_order, start=1):
-            entry = grouped_sources[key]
-            page_numbers = sorted(n for n in entry["page_numbers"] if n is not None)
-            if page_numbers:
-                if len(page_numbers) == 1:
-                    page_label = f"Page {page_numbers[0]}"
-                else:
-                    if len(page_numbers) <= 5:
-                        page_label = "Pages " + ", ".join(str(n) for n in page_numbers)
-                    else:
-                        page_label = f"Pages {page_numbers[0]}–{page_numbers[-1]}"
-            else:
-                page_label = None
-
+        sources: List[Dict[str, Any]] = []
+        for index, (key, entry) in enumerate(grouped.items(), start=1):
             metadata = dict(entry.get("metadata") or {})
-            metadata.update({
-                "snippet": entry.get("snippet"),
-                "preview_url": entry.get("preview_url"),
-                "page_numbers": page_numbers,
-                "page_label": page_label,
-                "chunk_count": entry.get("chunk_count", 0),
-                "source_display_name": entry.get("source_display_name"),
-                "raw_file_path": entry.get("raw_file_path"),
-            })
-
-            source_info = {
+            page_numbers: set[int] = set()
+            for chunk in entry["chunks"]:
+                chunk_meta = getattr(chunk, "metadata", {}) or {}
+                candidate = chunk_meta.get("page_number")
+                if isinstance(candidate, int):
+                    page_numbers.add(candidate)
+                candidate = chunk_meta.get("page")
+                if isinstance(candidate, int):
+                    page_numbers.add(candidate + 1)
+                if isinstance(chunk_meta.get("page_numbers"), (list, tuple)):
+                    for value in chunk_meta["page_numbers"]:
+                        if isinstance(value, int):
+                            page_numbers.add(value)
+            if page_numbers:
+                sorted_pages = sorted(page_numbers)
+                metadata["page_numbers"] = sorted_pages
+            else:
+                sorted_pages = []
+            best_chunk = max(
+                entry["chunks"],
+                key=lambda chunk: metadata.get("bm25_score", 0.0) if metadata else 0.0,
+            )
+            payload = {
                 "id": index,
-                "content": entry.get("content", ""),
-                "snippet": entry.get("snippet"),
+                "content": best_chunk.page_content if best_chunk else entry.get("content"),
                 "metadata": metadata,
-                "relevance_score": entry.get("relevance_score", 0.0),
-                "source_file": entry.get("raw_file_path"),
-                "raw_file_path": entry.get("raw_file_path"),
-                "source_display_path": entry.get("source_display_path"),
-                "source_display_name": entry.get("source_display_name"),
-                "page": page_numbers[0] if page_numbers else None,
-                "page_number": page_numbers[0] if page_numbers else None,
-                "page_numbers": page_numbers,
-                "page_label": page_label,
-                "preview_url": entry.get("preview_url"),
-                "chunk_count": entry.get("chunk_count"),
-                "citation": self._format_superscript(index),
+                "raw_file_path": metadata.get("raw_file_path"),
+                "relevance_score": metadata.get("relevance_score"),
+                "bm25_score": metadata.get("bm25_score"),
+                "retrieval_rank": metadata.get("retrieval_rank"),
+                "page_numbers": sorted_pages,
             }
+            sources.append(normalize_source_payload(payload, index))
 
-            if entry.get("bm25_score") is not None:
-                source_info["bm25_score"] = entry["bm25_score"]
-            if entry.get("retrieval_rank") is not None:
-                source_info["retrieval_rank"] = entry["retrieval_rank"]
+        sources.sort(key=lambda src: src.get("relevance_score", 0.0) or 0.0, reverse=True)
+        for idx, source in enumerate(sources, start=1):
+            source["id"] = idx
+            source["citation"] = source.get("citation") or source.get("display_name")
+        return sources
 
-            aggregated_sources.append(source_info)
+    def _select_retriever(self, overrides: Optional[Dict[str, Any]]):
+        if not overrides:
+            return self.retriever
+        semantic_weight = overrides.get("semantic_weight")
+        keyword_weight = overrides.get("keyword_weight")
+        k = overrides.get("k", RETRIEVER_K)
+        if semantic_weight is None and keyword_weight is None:
+            return self.retriever
+        return HybridRetriever(
+            self.vector_store,
+            self.documents,
+            semantic_weight=semantic_weight or RETRIEVER_SEMANTIC_WEIGHT,
+            keyword_weight=keyword_weight or RETRIEVER_KEYWORD_WEIGHT,
+            k=k,
+        )
 
-        aggregated_sources.sort(key=lambda x: x.get("relevance_score", 0.0), reverse=True)
-        return aggregated_sources
+    def _resolve_llm(self, overrides: Optional[Dict[str, Any]]):
+        if not overrides:
+            self.llm_provider = LLM_PROVIDER
+            self.llm_model = LLM_MODEL
+            return get_llm()
 
-    def _format_superscript(self, number: int) -> str:
-        return "".join(SUPERSCRIPT_MAP.get(ch, ch) for ch in str(number))
+        provider = overrides.get("provider", LLM_PROVIDER)
+        model = overrides.get("model", LLM_MODEL)
+        temperature = overrides.get("temperature")
+        max_output_tokens = overrides.get("max_output_tokens")
+        api_key = overrides.get("api_key")
+        request_timeout = overrides.get("request_timeout")
+        max_retries = overrides.get("max_retries")
 
-    def _replace_bracket_citations(self, text: str) -> str:
-        if not text:
-            return text
-
-        def replace_match(match):
-            return self._format_superscript(match.group(1))
-
-        updated = re.sub(r"\[(\d+)\]", replace_match, text)
-        updated = re.sub(r"\^\{?(\d+)\}?", replace_match, updated)
-        return updated
-
-    def _apply_superscript_citations(self, answer: str, sources: List[Dict[str, Any]]) -> str:
-        formatted_answer = self._replace_bracket_citations(answer or "").strip()
-        return formatted_answer
+        self.llm_provider = provider
+        self.llm_model = model
+        return get_llm(
+            provider=provider,
+            model=model,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            request_timeout=request_timeout,
+            api_key=api_key,
+            max_retries=max_retries,
+        )
     
     def _record_interaction(self, question: str, answer: str, sources: List[Dict[str, Any]]) -> None:
         try:

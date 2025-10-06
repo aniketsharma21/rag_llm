@@ -1,4 +1,5 @@
 import types
+from pathlib import Path
 
 import pytest
 from langchain.schema import Document
@@ -100,7 +101,8 @@ def test_enhanced_rag_chain_query_with_sources(patched_enhanced_chain, sample_do
     source_entry = sources[0]
     assert source_entry["citation"] == "¹"
     assert source_entry["metadata"]["page_numbers"] == [1, 2]
-    assert source_entry["metadata"]["raw_file_path"] == "data/raw/doc1.txt"
+    raw_path = Path(source_entry["metadata"]["raw_file_path"])
+    assert raw_path.as_posix().endswith("data/raw/doc1.txt")
 
     assert len(chain.conversation_history) == 1
     history_entry = chain.conversation_history[0]

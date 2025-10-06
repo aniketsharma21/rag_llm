@@ -11,6 +11,7 @@ import time
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import contextlib
+from contextlib import asynccontextmanager
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, status, Request
@@ -18,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 import uvicorn
 from pydantic import BaseModel, Field, field_validator
-from src.llm import get_llm
+from src.llm import get_llm, run_llm_health_check
 from src.logging_config import get_logger
 from src.exceptions import (
     RAGException,
@@ -40,6 +41,27 @@ logger = get_logger(__name__)
 ingestion_service = IngestionService()
 rag_service = RAGService()
 app_service = RAGApplicationService(ingestion_service, rag_service)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # pragma: no cover - framework integration
+    await init_database()
+    warmup_task: Optional[asyncio.Task] = None
+    try:
+        run_llm_health_check()
+        logger.info("LLM provider health check succeeded")
+    except Exception as exc:
+        logger.error("LLM provider health check failed", error=str(exc))
+        raise
+
+    warmup_task = asyncio.create_task(rag_service.warmup())
+    try:
+        yield
+    finally:
+        if warmup_task:
+            warmup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await warmup_task
 
 
 def _get_files_inventory() -> List[Dict[str, Any]]:
@@ -69,15 +91,11 @@ def _get_files_inventory() -> List[Dict[str, Any]]:
 app = FastAPI(
     title="RAG Pipeline API",
     description="API for document ingestion and question answering using RAG",
-    version="0.2.0"
+    version="0.2.0",
+    lifespan=lifespan,
 )
 
 setup_observability(app)
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    await init_database()
 
 # CORS middleware configuration
 app.add_middleware(
