@@ -1,82 +1,90 @@
 Configuration
 =============
 
-The application centralizes configuration in `src/config.py` using `AppSettings`, merging `.env`, `config.yaml`, and hard-coded defaults.
+The application centralizes configuration in `src/config.py` using `AppSettings`, which merges settings from `.env` files, `config.yaml`, and hard-coded defaults.
 
-Configuration Sources
----------------------
+Configuration Precedence
+------------------------
 
-1. `.env` – Secrets and per-environment overrides (highest precedence).
-2. `config.yaml` – Non-secret defaults committed to the repo (medium precedence).
-3. Code defaults – Fallback constants embedded in `AppSettings` (lowest precedence).
+The settings are loaded in the following order of precedence (from highest to lowest):
 
-Environment Variables
----------------------
+.. mermaid::
 
-Key environment variables expected in `.env`:
+   graph TD
+       A[Environment Variables (.env)] --> B[config.yaml];
+       B --> C[Code Defaults];
+
+1.  **Environment Variables (`.env`)**: Secrets and environment-specific overrides. This has the highest precedence.
+2.  **YAML Configuration (`config.yaml`)**: Non-secret defaults that can be committed to the repository. This has medium precedence.
+3.  **Code Defaults**: Fallback constants embedded in the `AppSettings` class. This has the lowest precedence.
+
+Key Configuration Settings
+--------------------------
+
+The following table details the most important configuration settings available in the `AppSettings` class:
+
+.. list-table:: AppSettings Configuration
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Setting
+     - Default
+     - Description
+   * - `llm_provider`
+     - `groq`
+     - The LLM provider to use (`groq` or `openai`).
+   * - `llm_model`
+     - `llama-3.1-8b-instant`
+     - The specific LLM model to use.
+   * - `llm_temperature`
+     - `0.1`
+     - The sampling temperature for the LLM.
+   * - `llm_max_output_tokens`
+     - `2048`
+     - The maximum number of tokens to generate.
+   * - `embedding_backend`
+     - `huggingface`
+     - The embedding backend to use (`huggingface`, `openai`, or `fake`).
+   * - `embedding_model`
+     - `all-MiniLM-L6-v2`
+     - The specific embedding model to use.
+   * - `chunk_size`
+     - `1000`
+     - The number of characters per text chunk.
+   * - `chunk_overlap`
+     - `150`
+     - The number of characters to overlap between chunks.
+   * - `retriever_semantic_weight`
+     - `0.7`
+     - The weight of the semantic search in the hybrid retriever.
+   * - `retriever_keyword_weight`
+     - `0.3`
+     - The weight of the keyword search in the hybrid retriever.
+   * - `retriever_k`
+     - `5`
+     - The number of documents to retrieve.
+   * - `database_url_sync`
+     - `sqlite:///conversations.db`
+     - The synchronous database URL.
+   * - `database_url_async`
+     - `sqlite+aiosqlite:///conversations.db`
+     - The asynchronous database URL.
+
+Environment-Specific Configurations
+---------------------------------
+
+For different environments, you can create separate `.env` files (e.g., `.env.development`, `.env.production`). The application will automatically load the appropriate file based on the `APP_ENV` environment variable. If `APP_ENV` is not set, it defaults to `.env`.
+
+For example, in a production environment, you might want to use a more robust database and a different LLM provider:
 
 .. code-block:: bash
-   :caption: `.env` example
+   :caption: .env.production
 
-   GROQ_API_KEY=your_groq_api_key
-   OPENAI_API_KEY=optional_openai_key
-   LLM_PROVIDER=groq
-   LLM_MODEL=llama-3.1-8b-instant
-   CHUNK_SIZE=1000
-   CHUNK_OVERLAP=150
-
-YAML Configuration
-------------------
-
-`config.yaml` supplements non-secret defaults. Example:
-
-.. code-block:: yaml
-   :caption: `config.yaml`
-
-   llm_provider: groq
-   llm_model: llama-3.1-8b-instant
-   llm_temperature: 0.1
-   llm_max_output_tokens: 2048
-   retriever_semantic_weight: 0.7
-   retriever_keyword_weight: 0.3
-   top_k: 5
-   embedding_backend: huggingface
-   embedding_model: all-MiniLM-L6-v2
-
-Programmatic Access
--------------------
-
-`AppSettings` exposes strongly typed properties; downstream modules import module-level constants (e.g., `LLM_MODEL`, `RETRIEVER_SEMANTIC_WEIGHT`) for convenience.
-
-.. code-block:: python
-   :caption: `src/config.py`
-
-   settings = get_settings()
-
-   LLM_MODEL = settings.llm_model
-   RETRIEVER_SEMANTIC_WEIGHT = settings.retriever_semantic_weight
-   RETRIEVER_KEYWORD_WEIGHT = settings.retriever_keyword_weight
-
-    @computed_field(return_type=str)
-    def chroma_persist_dir(self) -> str:
-        return str(self.base_dir / "chroma_store")
+   APP_ENV=production
+   GROQ_API_KEY=your_production_groq_api_key
+   DATABASE_URL=postgresql://user:password@host:port/database
 
 Embedding Configuration Drift
 -----------------------------
 
-`src/embed_store.py` persists the embedding signature to ``chroma_store/embedding_config.json``. On startup `load_vector_store()` compares this signature to the active settings, logging warnings when drift is detected and re-ingestion is required.
-
-Database URLs
--------------
-
-`AppSettings.database_url_sync` and `.database_url_async` derive SQLite defaults pointing to ``conversations.db``. Override `DATABASE_URL` in `.env` to point to PostgreSQL or other backends; async URLs automatically swap `sqlite:///` for `sqlite+aiosqlite:///` when necessary.
-
-Cache Directories
------------------
-
-* ``data/raw/`` – Raw uploads persisted by ingestion service.
-* ``data/processed/`` – Pickled chunk payloads.
-* ``chroma_store/`` – Vector store persistence and embedding config.
-* ``models_cache/`` – HuggingFace model cache controlled by `MODELS_CACHE_DIR`.
-
-Changing any embedding- or retriever-related parameter warrants re-running ingestion to maintain consistent embeddings.
+`src/embed_store.py` persists the embedding signature to `chroma_store/embedding_config.json`. On startup, `load_vector_store()` compares this signature to the active settings, logging warnings when drift is detected and re-ingestion is required. This ensures that the vector store remains consistent with the current configuration.

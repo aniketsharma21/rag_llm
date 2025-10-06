@@ -6,17 +6,28 @@ The ingestion pipeline converts uploaded documents into persisted vector indexes
 Workflow Overview
 -----------------
 
-1. **Upload** – `POST /ingest` receives a `multipart/form-data` payload and streams the file to `IngestionService.enqueue_upload()`.
-2. **Job tracking** – Metadata is inserted into `ingest_jobs` and `documents` tables via `JobRepository` and `DocumentRepository`.
-3. **Background execution** – `AsyncTaskQueue.submit()` dispatches `IngestionService.process_job()` without blocking the API thread.
-4. **Chunking** – `process_document()` loads the source via format-aware loaders, applies `RecursiveCharacterTextSplitter`, and enriches chunk metadata.
-5. **Vector rebuild** – `build_vector_store()` creates or refreshes the Chroma store and persists the embedding configuration; downstream `RAGService` warmup is invalidated.
+The following diagram illustrates the ingestion workflow from document upload to vector store regeneration:
+
+.. mermaid::
+
+   graph TD
+       A[POST /ingest] --> B{IngestionService};
+       B --> C[Enqueue Upload];
+       C --> D{Job & Document Repositories};
+       D --> E[Create Job & Document Records];
+       E --> F{AsyncTaskQueue};
+       F --> G[Process Job];
+       G --> H{process_document};
+       H --> I[Load & Chunk Document];
+       I --> J{build_vector_store};
+       J --> K[Rebuild Chroma Index];
+       K --> L[Update Job Status];
 
 Key Service Logic
 -----------------
 
 .. code-block:: python
-   :caption: `src/services/ingestion_service.py`
+   :caption: src/services/ingestion_service.py
 
    class IngestionService:
        def __init__(self, task_queue: Optional[AsyncTaskQueue] = None) -> None:
@@ -97,6 +108,18 @@ Vector Store Regeneration
 Operational Considerations
 --------------------------
 
-* **Job status polling** – `GET /status/{job_id}` surfaces `status`, `message`, `chunks_count`, and error metadata. Integrate this endpoint with CI pipelines to detect ingest regressions.
-* **Storage layout** – Raw files live under ``data/raw/`` while processed artifacts are stored in ``data/processed/`` and hashes in ``data/processed/checksums/``.
-* **Failure handling** – Failures trigger `DocumentProcessingError` or `VectorStoreError`; the job record is marked `failed` with serialized exception details for audit.
+* **Job status polling** – `GET /status/{job_id}` surfaces `status`, `message`, `chunks_count`, and error metadata. Integrate this endpoint with CI pipelines to detect ingest regressions. The job status can be one of `queued`, `processing`, `completed`, `skipped`, or `failed`.
+* **Storage layout** – Raw files live under ``data/raw/`` while processed artifacts are stored in ``data/processed/`` and hashes in ``data/processed/checksums/``. This separation simplifies cleanup and auditing.
+* **Failure handling** – Failures during document processing or vector store regeneration trigger `DocumentProcessingError` or `VectorStoreError`, respectively. The job record is marked `failed` with serialized exception details for audit. The system is designed to be resilient to transient failures, and jobs can be manually retried.
+
+Configuration
+-------------
+
+The ingestion pipeline is configured through the `AppSettings` object in `src/config.py`. Key settings include:
+
+*   **`chunk_size`**: The number of characters per chunk.
+*   **`chunk_overlap`**: The number of characters to overlap between chunks.
+*   **`embedding_backend`**: The embedding model to use (`huggingface`, `openai`, or `fake`).
+*   **`embedding_model`**: The specific embedding model to use (e.g., `all-MiniLM-L6-v2`).
+
+Changes to these settings may require re-ingestion of documents to ensure consistency.

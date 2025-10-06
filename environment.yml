@@ -7,4 +7,3 @@ dependencies:
   - nodejs=18
   - pip:
       - -r requirements.txt
-      - -r requirements-clean.txt

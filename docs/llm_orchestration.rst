@@ -3,6 +3,21 @@ LLM Orchestration
 
 The LLM orchestration layer coordinates provider selection, prompt construction, and output normalization.
 
+.. mermaid::
+
+   graph TD
+       A[Query] --> B{RAGService};
+       B --> C[Get or Create Conversation];
+       C --> D{EnhancedRAGChain};
+       D --> E[Select Prompt Template];
+       E --> F{Get LLM Provider};
+       F --> G[Invoke LLM];
+       G --> H[Process Response];
+       H --> I[Calculate Confidence Score];
+       I --> J[Format Citations];
+       J --> K[Persist Conversation];
+       K --> L[Return Response];
+
 Provider Registry
 -----------------
 
@@ -20,7 +35,7 @@ Provider Registry
 Enhanced RAG Chain
 ------------------
 
-`EnhancedRAGChain` encapsulates advanced retrieval, prompt management, and output shaping:
+`EnhancedRAGChain` encapsulates advanced retrieval, prompt management, and output shaping. It is the core component of the LLM orchestration layer, responsible for generating a response from a given query and context.
 
 .. code-block:: python
    :caption: `EnhancedRAGChain.query()` abridged
@@ -58,14 +73,13 @@ Conversation Persistence
 Prompt Selection
 ----------------
 
-`PromptManager.select_template_by_query_type()` inspects the query to classify it as `technical`, `analysis`, `synthesis`, `source_attribution`, or default `base`. `get_enhanced_prompt()` then formats context strings (including metadata like `page_number` and `snippet`) and optionally injects chat history for conversational templates.
+`PromptManager.select_template_by_query_type()` inspects the query to classify it as `technical`, `analysis`, `synthesis`, `source_attribution`, or default `base`. This classification is based on a set of keywords and heuristics. `get_enhanced_prompt()` then formats context strings (including metadata like `page_number` and `snippet`) and optionally injects chat history for conversational templates.
 
 Confidence & Citations
 ----------------------
 
-* Superscript citation formatting uses `src.utils.source_formatting.apply_superscript_citations()` to replace numeric references with Unicode superscripts.
-* `EnhancedRAGChain._calculate_confidence_score()` incorporates retrieved document counts and retriever quality signals to produce a 0–1 float exposed via API responses.
-* `replace_bracket_citations()` converts intermediate `[1]` style references into superscript output consumed by the frontend.
+*   **Confidence Scoring**: `EnhancedRAGChain._calculate_confidence_score()` produces a score between 0 and 1, reflecting the system's confidence in the generated answer. The score is based on the number and relevance of the retrieved documents, as well as the clarity of the LLM's response.
+*   **Citation Formatting**: The system uses a two-stage process for citations. First, `replace_bracket_citations()` converts intermediate `[1]` style references into a structured format. Then, `src.utils.source_formatting.apply_superscript_citations()` replaces these with Unicode superscripts for a clean, academic-style presentation in the frontend.
 
 Performance Instrumentation
 ---------------------------

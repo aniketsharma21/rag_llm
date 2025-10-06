@@ -3,6 +3,17 @@ Retrieval Pipeline
 
 This section details the hybrid retrieval stack that fuses vector similarity and keyword search to deliver robust context selection.
 
+.. mermaid::
+
+   graph TD
+       A[Query] --> B{AdvancedRetriever};
+       B --> C[Expand with Conversation History];
+       C --> D{HybridRetriever};
+       D --> E[Vector & BM25 Retrievers];
+       E --> F[Ensemble Retriever];
+       F --> G[Fused Document List];
+       G --> H[Return to RAG Chain];
+
 Hybrid Retriever
 ----------------
 
@@ -37,10 +48,10 @@ Hybrid Retriever
 
 `retrieve()` returns the fused document list, annotating metadata such as `retrieval_rank` and, when the manual fallback path is triggered, `bm25_score`.
 
-Conversation Context
---------------------
+Advanced Retriever & Conversation Context
+-----------------------------------------
 
-`AdvancedRetriever.retrieve_with_context()` augments the current query with recent conversation turns to bias retrieval toward topical continuity:
+The `AdvancedRetriever` sits in front of the `HybridRetriever` and is responsible for managing conversational context. Its `retrieve_with_context()` method augments the current query with recent conversation turns to bias retrieval toward topical continuity:
 
 .. code-block:: python
    :caption: `AdvancedRetriever.retrieve_with_context()`
@@ -58,10 +69,12 @@ Conversation Context
 
        return self.retrieve(expanded_query, k)
 
+This query expansion is critical for maintaining context in multi-turn conversations, ensuring that the retriever has access to the full conversational history when searching for relevant documents.
+
 Fallback Mechanics
 ------------------
 
-When the ensemble cannot be constructed (e.g., BM25 unavailable), `HybridRetriever._manual_hybrid_retrieval()` interleaves vector and BM25 results, while `_vector_only_retrieval()` ensures graceful degradation.
+The system is designed to be resilient to failures in the retrieval pipeline. When the ensemble retriever cannot be constructed (e.g., if the BM25 index is not available), the `HybridRetriever` gracefully degrades to a fallback mechanism. `HybridRetriever._manual_hybrid_retrieval()` interleaves vector and BM25 results, while `_vector_only_retrieval()` ensures that the system can still provide results even if only the vector store is available. This ensures that the user always receives a response, even if it's not as accurate as a full hybrid search.
 
 Retrieval Telemetry
 -------------------
@@ -80,4 +93,4 @@ Retriever weights and document counts are controlled through `src/config.py` val
    retriever_keyword_weight: float = Field(default=_YAML_DEFAULTS.get("retriever_keyword_weight", 0.3))
    retriever_k: int = Field(default=_YAML_DEFAULTS.get("retriever_k", 5))
 
-Overriding these parameters at runtime requires re-ingestion to maintain vector store consistency.
+These settings allow for fine-tuning of the retrieval process. The `retriever_semantic_weight` and `retriever_keyword_weight` control the balance between semantic and keyword search, while `retriever_k` determines the number of documents to retrieve. Overriding these parameters at runtime may require re-ingestion to maintain vector store consistency.
