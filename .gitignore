@@ -39,6 +39,10 @@ models_cache/
 chroma_store/
 data/processed/
 
+# Documentation
+docs/_build/
+!docs/_build/html/.nojekyll
+
 # Node.js
 node_modules/
 npm-debug.log*
