@@ -1,0 +1,13 @@
+/* Custom styles for RAG LLM Sphinx docs */
+
+body {
+    font-family: "Inter", "Segoe UI", sans-serif;
+}
+
+div.admonition.note {
+    border-left: 4px solid #2563eb;
+}
+
+code, pre {
+    font-family: "Fira Code", "Consolas", monospace;
+}
