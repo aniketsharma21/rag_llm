@@ -92,6 +92,20 @@ rag_llm/
         ```
         You can also populate `config.yaml` with non-secret defaults (for example, `chunk_size`, `embedding_model`). Both files are loaded automatically during startup.
 
+        ```yaml
+        # config.yaml (example)
+        llm_provider: groq
+        llm_model: llama-3.1-8b-instant
+        llm_temperature: 0.1
+        llm_max_output_tokens: 2048
+        retriever_semantic_weight: 0.7
+        retriever_keyword_weight: 0.3
+        embedding_backend: huggingface
+        embedding_model: all-MiniLM-L6-v2
+        ```
+
+        **Precedence:** environment variables override values in `config.yaml`, which override the built-in defaults defined in `src/config.py`.
+
 3.  **Set Up the Frontend**
     ```bash
     cd frontend
@@ -143,6 +157,20 @@ To run the backend test suite, use `pytest` from the project root:
 ```bash
 pytest
 ```
+
+### Synthetic Fixtures
+
+The embedding tests rely on lightweight synthetic documents (no large corpora required). Fixtures reset the vector store to a temporary directory, so running the suite will not mutate your local `chroma_store/` directory.
+
+## ⚙️ Configuration & Embedding Backends
+
+* __Override precedence__ — `AppSettings` merges `.env` → `config.yaml` → defaults. Use `.env` for secrets, `config.yaml` for project-wide defaults.
+* __LLM providers__ — `llm_provider` selects the registry entry (`groq`, `openai`, etc.). Configure retries and timeouts using `llm_max_retries` and `llm_request_timeout`.
+* __Embedding backends__ — choose between:
+  * `huggingface` (default): downloads models locally and caches under `MODELS_CACHE_DIR`.
+  * `openai`: uses the OpenAI embeddings API (requires `OPENAI_API_KEY`).
+  * `fake`: test double used in unit tests for fast, dependency-free execution.
+* __Re-ingestion warnings__ — whenever the embedding backend/model configuration changes, the system logs a warning instructing you to re-ingest documents so the vector store stays consistent.
 
 ## 📡 API Reference
 

@@ -56,8 +56,22 @@ class AppSettings(BaseSettings):
     chunk_overlap: int = Field(default=_YAML_DEFAULTS.get("chunk_overlap", 150))
     top_k: int = Field(default=_YAML_DEFAULTS.get("top_k", 5))
 
+    llm_provider: str = Field(default=_YAML_DEFAULTS.get("llm_provider", "groq"))
     llm_model: str = Field(default=_YAML_DEFAULTS.get("llm_model", "llama-3.1-8b-instant"))
+    llm_temperature: float = Field(default=_YAML_DEFAULTS.get("llm_temperature", 0.1))
+    llm_max_output_tokens: int = Field(default=_YAML_DEFAULTS.get("llm_max_output_tokens", 2048))
+    llm_request_timeout: Optional[int] = Field(default=_YAML_DEFAULTS.get("llm_request_timeout"))
+    llm_max_retries: int = Field(default=_YAML_DEFAULTS.get("llm_max_retries", 3))
+
+    retriever_semantic_weight: float = Field(default=_YAML_DEFAULTS.get("retriever_semantic_weight", 0.7))
+    retriever_keyword_weight: float = Field(default=_YAML_DEFAULTS.get("retriever_keyword_weight", 0.3))
+    retriever_k: int = Field(default=_YAML_DEFAULTS.get("retriever_k", 5))
+
+    embedding_backend: str = Field(default=_YAML_DEFAULTS.get("embedding_backend", "huggingface"))
     embedding_model: str = Field(default=_YAML_DEFAULTS.get("embedding_model", "all-MiniLM-L6-v2"))
+    embedding_endpoint: Optional[str] = Field(default=_YAML_DEFAULTS.get("embedding_endpoint"))
+    embedding_api_key: Optional[str] = Field(default=_YAML_DEFAULTS.get("embedding_api_key"))
+
     database_url: Optional[str] = Field(default=_YAML_DEFAULTS.get("database_url"))
 
     @computed_field(return_type=str)
@@ -104,10 +118,31 @@ class AppSettings(BaseSettings):
         return url
 
 
+def _mask_value(key: str, value: Any) -> Any:
+    if value is None:
+        return None
+    sensitive_keys = {"api_key", "openai_api_key", "groq_api_key", "embedding_api_key"}
+    if any(token in key.lower() for token in sensitive_keys):
+        return "***"
+    if isinstance(value, str) and len(value) > 64:
+        return value[:61] + "…"
+    return value
+
+
+def _log_effective_settings(settings: AppSettings) -> None:
+    values = settings.model_dump()
+    sanitized = {key: _mask_value(key, value) for key, value in values.items()}
+    logger.info(
+        "Configuration loaded",
+        precedence="environment variables > config.yaml > defaults",
+        settings=sanitized,
+    )
+
+
 @lru_cache()
 def get_settings() -> AppSettings:
     settings = AppSettings()
-    logger.debug("Configuration loaded", base_dir=str(settings.base_dir))
+    _log_effective_settings(settings)
     return settings
 
 
@@ -132,3 +167,17 @@ TOP_K = settings.top_k
 
 LLM_MODEL = settings.llm_model
 EMBEDDING_MODEL = settings.embedding_model
+
+LLM_PROVIDER = settings.llm_provider
+LLM_TEMPERATURE = settings.llm_temperature
+LLM_MAX_OUTPUT_TOKENS = settings.llm_max_output_tokens
+LLM_REQUEST_TIMEOUT = settings.llm_request_timeout
+LLM_MAX_RETRIES = settings.llm_max_retries
+
+RETRIEVER_SEMANTIC_WEIGHT = settings.retriever_semantic_weight
+RETRIEVER_KEYWORD_WEIGHT = settings.retriever_keyword_weight
+RETRIEVER_K = settings.retriever_k
+
+EMBEDDING_BACKEND = settings.embedding_backend
+EMBEDDING_ENDPOINT = settings.embedding_endpoint
+EMBEDDING_API_KEY = settings.embedding_api_key
