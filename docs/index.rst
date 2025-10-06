@@ -39,17 +39,18 @@ RAG LLM Technical Documentation
       - :doc:`LLM Orchestration <llm_orchestration>`
 
    .. grid-item-card:: API Reference
+      :link: api_reference.html
+      :link-type: doc
       :class-card: sd-outline-info
       
       Complete API documentation for all modules and functions.
       
-      + + + 
-      - :doc:`REST API <api_reference>`
-      - :doc:`WebSocket API <api_reference#websocket-interface>`
+      +++
+      - :doc:`High-Level API <api_reference>`
+      - :doc:`Backend (Auto-generated) <backend_api_reference>`
       - :doc:`Conversation API <conversation_api>`
       - :doc:`File Management API <file_management_api>`
       - :doc:`Frontend Components <frontend_components>`
-      - :doc:`Configuration Reference <configuration>`
 
    .. grid-item-card:: Operations
       :link: operations.html
@@ -58,9 +59,9 @@ RAG LLM Technical Documentation
       Deployment, monitoring, and maintenance guides.
       
       +++
+      - :doc:`Configuration <configuration>`
       - :doc:`Deployment <operations>`
-      - :doc:`Monitoring <operations#monitoring>`
-      - :doc:`Troubleshooting <operations#troubleshooting>`
+      - :doc:`Testing <testing>`
 
 .. note::
    This documentation targets senior engineers integrating and operating the enterprise-grade Retrieval-Augmented Generation (RAG) pipeline. It assumes familiarity with FastAPI, LangChain, distributed systems, and observability tooling.
@@ -68,22 +69,41 @@ RAG LLM Technical Documentation
 .. toctree::
    :maxdepth: 2
    :hidden:
-   :caption: Documentation
-   
+   :caption: Getting Started
+
    overview
    architecture
+   build_and_validation
+
+.. toctree::
+   :maxdepth: 2
+   :hidden:
+   :caption: Core Components
+
    ingestion_pipeline
    retrieval_pipeline
    llm_orchestration
+
+.. toctree::
+   :maxdepth: 2
+   :hidden:
+   :caption: API Reference
+
    api_reference
+   backend_api_reference
    conversation_api
    file_management_api
    frontend_components
+
+.. toctree::
+   :maxdepth: 2
+   :hidden:
+   :caption: Operations
+
    configuration
    operations
    testing
    changelog
-   build_and_validation
 
 .. toctree::
    :maxdepth: 1

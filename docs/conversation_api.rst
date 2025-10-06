@@ -3,245 +3,103 @@
 Conversation Management API
 ===========================
 
-This section documents the Conversation Management API endpoints for the RAG LLM application.
+The Conversation Management API provides a set of endpoints to create, retrieve, and manage conversations within the RAG LLM application. This API is essential for maintaining conversation history and enabling multi-turn interactions.
 
-List Conversations
-------------------
+Data Models
+-----------
 
-.. http:get:: /conversations
+**Conversation**
 
-   List all conversations for a user with pagination support.
+A `Conversation` object represents a single conversation thread.
 
-   **Query Parameters**:
+.. list-table:: Conversation Model
+   :header-rows: 1
+   :widths: 20 10 70
 
-   .. list-table:: Parameters
-      :header-rows: 1
-      :widths: 20 10 70
+   * - Field
+     - Type
+     - Description
+   * - `id`
+     - integer
+     - The unique identifier for the conversation.
+   * - `title`
+     - string
+     - The title of the conversation.
+   * - `user_id`
+     - string
+     - The ID of the user who owns the conversation.
+   * - `created_at`
+     - string
+     - The timestamp when the conversation was created.
+   * - `updated_at`
+     - string
+     - The timestamp when the conversation was last updated.
+   * - `messages`
+     - array
+     - An array of `Message` objects associated with the conversation.
 
-      * - Parameter
-        - Type
-        - Description
-      * - user_id
-        - string
-        - (Optional) User ID (default: "default_user")
-      * - limit
-        - integer
-        - (Optional) Maximum number of conversations to return (default: 50)
-      * - offset
-        - integer
-        - (Optional) Pagination offset (default: 0)
+**Message**
 
-   **Response**:
+A `Message` object represents a single message within a conversation.
 
-   .. code-block:: json
+.. list-table:: Message Model
+   :header-rows: 1
+   :widths: 20 10 70
 
-      {
-        "conversations": [
-          {
-            "id": 1,
-            "title": "Conversation about RAG",
-            "created_at": "2025-10-07T01:42:00Z",
-            "updated_at": "2025-10-07T01:43:30Z",
-            "message_count": 5
-          }
-        ],
-        "total": 1,
-        "limit": 50,
-        "offset": 0
-      }
+   * - Field
+     - Type
+     - Description
+   * - `id`
+     - integer
+     - The unique identifier for the message.
+   * - `content`
+     - string
+     - The content of the message.
+   * - `role`
+     - string
+     - The role of the message sender (`user` or `assistant`).
+   * - `created_at`
+     - string
+     - The timestamp when the message was created.
 
-   **Error Responses**:
+API Endpoints
+-------------
 
-   .. list-table:: Error Responses
-      :header-rows: 1
-      :widths: 15 15 70
+**GET /conversations**
+~~~~~~~~~~~~~~~~~~~~~~
 
-      * - Status Code
-        - Error Code
-        - Description
-      * - 401
-        - UNAUTHORIZED
-        - Missing or invalid authentication
-      * - 500
-        - INTERNAL_SERVER_ERROR
-        - Server error while fetching conversations
+Lists all conversations for a user with pagination support.
 
-Get Conversation
----------------
+* **Query Parameters**:
+    * `user_id` (string, optional): The ID of the user. Defaults to `default_user`.
+    * `limit` (integer, optional): The maximum number of conversations to return. Defaults to `50`.
+    * `offset` (integer, optional): The pagination offset. Defaults to `0`.
 
-.. http:get:: /conversations/{conversation_id}
+* **Response**: A JSON object containing a list of `Conversation` objects.
 
-   Get details of a specific conversation including its messages.
+**GET /conversations/{conversation_id}**
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   **Path Parameters**:
+Retrieves the details of a specific conversation, including its messages.
 
-   .. list-table:: Parameters
-      :header-rows: 1
-      :widths: 20 10 70
+* **Path Parameter**: `conversation_id` (integer)
 
-      * - Parameter
-        - Type
-        - Description
-      * - conversation_id
-        - integer
-        - ID of the conversation to retrieve
+* **Response**: A `Conversation` object.
 
-   **Response**:
+**POST /conversations**
+~~~~~~~~~~~~~~~~~~~~~~~
 
-   .. code-block:: json
+Creates a new conversation.
 
-      {
-        "id": 1,
-        "title": "Conversation about RAG",
-        "user_id": "default_user",
-        "created_at": "2025-10-07T01:42:00Z",
-        "updated_at": "2025-10-07T01:43:30Z",
-        "messages": [
-          {
-            "id": 1,
-            "content": "What is RAG?",
-            "role": "user",
-            "created_at": "2025-10-07T01:42:10Z"
-          },
-          {
-            "id": 2,
-            "content": "RAG (Retrieval-Augmented Generation) is...",
-            "role": "assistant",
-            "created_at": "2025-10-07T01:42:15Z"
-          }
-        ]
-      }
+* **Request Body**: A JSON object with a `title` (string) and an optional `user_id` (string).
 
-   **Error Responses**:
+* **Response**: The newly created `Conversation` object.
 
-   .. list-table:: Error Responses
-      :header-rows: 1
-      :widths: 15 15 70
+**DELETE /conversations/{conversation_id}**
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-      * - Status Code
-        - Error Code
-        - Description
-      * - 401
-        - UNAUTHORIZED
-        - Missing or invalid authentication
-      * - 404
-        - NOT_FOUND
-        - Conversation not found
-      * - 500
-        - INTERNAL_SERVER_ERROR
-        - Server error while fetching conversation
+Deletes a conversation and all its associated messages.
 
-Create Conversation
-------------------
+* **Path Parameter**: `conversation_id` (integer)
 
-.. http:post:: /conversations
-
-   Create a new conversation.
-
-   **Request Body**:
-
-   .. list-table:: Fields
-      :header-rows: 1
-      :widths: 20 10 70
-
-      * - Field
-        - Type
-        - Description
-      * - title
-        - string
-        - Title for the conversation
-      * - user_id
-        - string
-        - (Optional) User ID (default: "default_user")
-
-   **Request Example**:
-
-   .. code-block:: json
-
-      {
-        "title": "New Conversation",
-        "user_id": "user123"
-      }
-
-   **Response**:
-
-   .. code-block:: json
-
-      {
-        "id": 2,
-        "title": "New Conversation",
-        "user_id": "user123",
-        "created_at": "2025-10-07T02:00:00Z",
-        "updated_at": "2025-10-07T02:00:00Z",
-        "messages": []
-      }
-
-   **Error Responses**:
-
-   .. list-table:: Error Responses
-      :header-rows: 1
-      :widths: 15 15 70
-
-      * - Status Code
-        - Error Code
-        - Description
-      * - 400
-        - VALIDATION_ERROR
-        - Invalid request body
-      * - 401
-        - UNAUTHORIZED
-        - Missing or invalid authentication
-      * - 500
-        - INTERNAL_SERVER_ERROR
-        - Server error while creating conversation
-
-Delete Conversation
-------------------
-
-.. http:delete:: /conversations/{conversation_id}
-
-   Delete a conversation and all its messages.
-
-   **Path Parameters**:
-
-   .. list-table:: Parameters
-      :header-rows: 1
-      :widths: 20 10 70
-
-      * - Parameter
-        - Type
-        - Description
-      * - conversation_id
-        - integer
-        - ID of the conversation to delete
-
-   **Response**:
-
-   .. code-block:: json
-
-      {
-        "success": true,
-        "message": "Conversation deleted successfully"
-      }
-
-   **Error Responses**:
-
-   .. list-table:: Error Responses
-      :header-rows: 1
-      :widths: 15 15 70
-
-      * - Status Code
-        - Error Code
-        - Description
-      * - 401
-        - UNAUTHORIZED
-        - Missing or invalid authentication
-      * - 403
-        - FORBIDDEN
-        - User not authorized to delete this conversation
-      * - 404
-        - NOT_FOUND
-        - Conversation not found
-      * - 500
-        - INTERNAL_SERVER_ERROR
-        - Server error while deleting conversation
+* **Response**: A JSON object indicating success or failure.
