@@ -10,7 +10,7 @@ myst-parser>=2.0.0,<3.0.0
 sphinxcontrib-mermaid>=0.9.2,<1.0.0
 sphinx-copybutton>=0.5.2,<1.0.0
 sphinxcontrib-httpdomain>=1.8.0,<2.0.0
-sphinxext-rediraffe>=1.0.0,<2.0.0
+sphinxext-rediraffe==0.3.0  # Latest version available on PyPI
 
 # Documentation Dependencies
 Pygments>=2.13.0,<3.0.0
