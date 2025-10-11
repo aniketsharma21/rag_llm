@@ -1,14 +1,33 @@
-"""
-api.py
+"""FastAPI application for the RAG pipeline web service.
 
-FastAPI application exposing the RAG pipeline as a web service with endpoints for
-document ingestion and querying. Includes WebSocket support for real-time updates.
+This module implements a RESTful API and WebSocket interface for interacting with
+the RAG (Retrieval-Augmented Generation) pipeline. It provides endpoints for
+document ingestion, querying, and conversation management.
+
+Key Features:
+- Document upload and processing
+- Real-time question answering via REST and WebSocket
+- Conversation history management
+- File preview and management
+- Health monitoring and metrics
+
+Dependencies:
+- FastAPI: Web framework
+- Uvicorn: ASGI server
+- Pydantic: Data validation
+- SQLAlchemy: Database ORM
+
+Environment Variables:
+- DATABASE_URL: Database connection string
+- LOG_LEVEL: Logging level (DEBUG, INFO, WARNING, ERROR)
+- DEBUG: Enable debug mode
 """
 import os
 import json
 import asyncio
 import time
 from typing import List, Optional, Dict, Any
+{{ ... }}
 from datetime import datetime
 import contextlib
 from contextlib import asynccontextmanager
@@ -272,7 +291,20 @@ class ConversationListResponse(BaseModel):
 
 # WebSocket connection manager
 class ConnectionManager:
+    """Manages active WebSocket connections and their associated tasks.
+    
+    This class handles the lifecycle of WebSocket connections, including:
+    - Tracking active connections
+    - Managing message broadcasting
+    - Cleaning up resources on disconnect
+    - Handling concurrent tasks per connection
+    
+    Attributes:
+        active_connections: List of currently active WebSocket connections.
+        _active_tasks: Dictionary mapping WebSockets to their active tasks.
+    """
     def __init__(self):
+        """Initialize the connection manager with empty connection and task lists."""
         self.active_connections: List[WebSocket] = []
         self._active_tasks: Dict[WebSocket, asyncio.Task] = {}
 
@@ -305,33 +337,21 @@ class ConnectionManager:
 
     def clear_task(self, websocket: WebSocket) -> None:
         self._active_tasks.pop(websocket, None)
-
 manager = ConnectionManager()
 
 # Health check endpoint
 @app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """Health check endpoint to verify the API is running."""
-    try:
-        llm = get_llm()
-        return {
-            "status": "healthy",
-            "model": llm.model_name
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Service unavailable: {str(e)}"
-        )
-
-# Document upload endpoint
-@app.post("/ingest", response_model=IngestResponse)
-async def ingest_document(file: UploadFile = File(...)):
-    """
-    Upload and index a document for the RAG pipeline.
+async def health_check() -> HealthResponse:
+    """Health check endpoint to verify the API is running.
     
-    Args:
-        file: The document file to upload (PDF, DOCX, TXT, CSV, JSON, MD, PPTX, XLSX)
+    This endpoint performs a comprehensive health check of the API and its dependencies,
+    including the LLM provider, database connection, and other critical services.
+    
+    Returns:
+        HealthResponse: An object containing the API status and model information.
+        
+    Raises:
+        HTTPException: If any critical service is unavailable.
     """
     try:
         job_id, file_path = await app_service.ingest_document(file)
@@ -354,7 +374,25 @@ async def ingest_document(file: UploadFile = File(...)):
 
 @app.get("/status/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str):
-    """Return current status for a previously submitted ingest job."""
+    """Retrieve the current status of a document ingestion job.
+    
+    This endpoint provides detailed status information about a specific document
+    processing job, including progress, errors, and metadata.
+    
+    Args:
+        job_id: The unique identifier of the ingestion job.
+        
+    Returns:
+        JobStatusResponse: Detailed status information about the job.
+        
+    Raises:
+        HTTPException: If the job ID is not found.
+        
+    Example:
+        ```
+        GET /status/123e4567-e89b-12d3-a456-426614174000
+        ```
+    """
     record = await app_service.get_job_status(job_id)
 
     if record is None:
@@ -374,6 +412,22 @@ async def get_job_status(job_id: str):
 
 @app.get("/files")
 async def list_uploaded_files():
+    """List all uploaded and processed documents.
+    
+    Returns a list of documents that have been successfully uploaded and processed
+    by the system, including their metadata and processing status.
+    
+    Returns:
+        dict: A dictionary containing a list of files and their metadata.
+        
+    Raises:
+        HTTPException: If there's an error retrieving the file list.
+        
+    Example:
+        ```
+        GET /files
+        ```
+    """
     try:
         files = await asyncio.to_thread(_get_files_inventory)
         return {"files": files}
@@ -471,7 +525,34 @@ async def query_rag(query: QueryRequest):
 # WebSocket endpoint for chat
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time chat with the RAG pipeline."""
+    """WebSocket endpoint for real-time chat with the RAG pipeline.
+    
+    This endpoint maintains a persistent WebSocket connection for streaming
+    responses to user queries. It handles connection lifecycle, message
+    processing, and error handling.
+    
+    The WebSocket protocol:
+    1. Client connects to /ws
+    2. Client sends JSON messages with 'type' and 'data' fields
+    3. Server streams responses with 'type' and 'data' fields
+    4. Either side can close the connection with status code 1000
+    
+    Message Types (client → server):
+    - 'query': Submit a new question
+    - 'cancel': Cancel the current query
+    
+    Message Types (server → client):
+    - 'status': Connection and query status updates
+    - 'token': Streamed response tokens
+    - 'sources': Source documents for the answer
+    - 'error': Error message
+    
+    Args:
+        websocket: The WebSocket connection instance.
+        
+    Raises:
+        WebSocketDisconnect: When the client disconnects or an error occurs.
+    """
     try:
         await manager.connect(websocket)
         logger.info("New WebSocket connection", client=str(getattr(websocket, "client", "unknown")))

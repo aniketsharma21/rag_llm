@@ -1,4 +1,15 @@
-"""Service layer for RAG query orchestration."""
+"""Service layer for RAG (Retrieval-Augmented Generation) query orchestration.
+
+This module provides the core service layer for the RAG application, handling
+conversation management, document retrieval, and response generation. It serves
+as an abstraction layer between the API endpoints and the underlying data and LLM layers.
+
+Key Features:
+- Conversation management (create, read, update, delete)
+- Document retrieval and processing
+- Integration with vector stores and LLMs
+- Caching and performance optimizations
+"""
 from __future__ import annotations
 
 import asyncio
@@ -34,17 +45,39 @@ logger = get_logger(__name__)
 
 
 class RAGService:
-    """Provides higher-level operations for answering queries."""
+    """Core service for RAG operations including conversation and document management.
+    
+    This service handles the main RAG functionality including conversation management,
+    document retrieval, and response generation. It maintains an internal cache of
+    document chunks and manages the lifecycle of the enhanced RAG chain.
+    
+    Attributes:
+        _enhanced_chain: Cached instance of EnhancedRAGChain.
+        _chunk_cache: LRU cache for document chunks.
+        _chain_lock: Thread lock for thread-safe chain initialization.
+        _cache_lock: Thread lock for thread-safe cache access.
+        _MAX_CHUNK_FILES: Maximum number of chunk files to keep in memory.
+    """
 
     _MAX_CHUNK_FILES = 48
 
     def __init__(self) -> None:
+        """Initialize a new RAGService instance.
+        
+        Sets up the service with empty caches and thread locks for thread-safe operations.
+        The enhanced RAG chain is initialized lazily when first needed.
+        """
         self._enhanced_chain: Optional[EnhancedRAGChain] = None
         self._chunk_cache: OrderedDict[str, List[Any]] = OrderedDict()
         self._chain_lock: Lock = Lock()
         self._cache_lock: Lock = Lock()
 
     def reset_chain(self) -> None:
+        """Reset the RAG chain and clear all cached chunks.
+        
+        This method is useful for forcing a reload of documents and vector store
+        when the underlying data changes.
+        """
         self._enhanced_chain = None
         with self._cache_lock:
             self._chunk_cache.clear()
@@ -62,6 +95,15 @@ class RAGService:
         user_id: str = "default_user",
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
+        """List conversations for a specific user.
+        
+        Args:
+            user_id: The ID of the user whose conversations to list. Defaults to "default_user".
+            limit: Maximum number of conversations to return. Defaults to 50.
+            
+        Returns:
+            A list of conversation dictionaries, ordered by most recent update.
+        """
         async with get_session() as session:
             repo = ConversationRepository(session)
             return await repo.list(user_id=user_id, limit=limit)
@@ -84,6 +126,19 @@ class RAGService:
         user_message: Dict[str, Any],
         assistant_message: Dict[str, Any],
     ) -> None:
+        """Append a message exchange to an existing conversation.
+        
+        Args:
+            conversation_id: The ID of the conversation to update.
+            user_message: The user's message as a dictionary.
+            assistant_message: The assistant's response as a dictionary.
+            
+        Raises:
+            ConversationError: If the conversation is not found.
+            
+        Note:
+            Both messages are appended to the conversation in a single transaction.
+        """
         async with get_session() as session:
             repo = ConversationRepository(session)
             conversation = await repo.get(conversation_id)
@@ -104,6 +159,19 @@ class RAGService:
             return await repo.delete(conversation_id)
 
     def _load_documents(self) -> List[Any]:
+        """Load and cache document chunks from the processed data directory.
+        
+        This method implements an LRU cache for document chunks to optimize
+        performance when loading multiple documents. It maintains a cache of
+        recently used chunks and evicts the least recently used ones when the
+        cache size exceeds _MAX_CHUNK_FILES.
+        
+        Returns:
+            A list of document chunks loaded from disk.
+            
+        Note:
+            This method is thread-safe and uses a lock to protect the cache.
+        """
         documents: List[Any] = []
         if not os.path.exists(PROCESSED_DATA_DIR):
             return documents
@@ -146,6 +214,18 @@ class RAGService:
         return documents
 
     def _ensure_chain(self) -> Optional[EnhancedRAGChain]:
+        """Ensure the RAG chain is initialized and return it.
+        
+        This method implements the singleton pattern with double-checked locking
+        to ensure thread-safe initialization of the RAG chain.
+        
+        Returns:
+            An initialized EnhancedRAGChain instance, or None if initialization fails.
+            
+        Note:
+            This method is thread-safe and uses a lock to prevent multiple
+            initializations in concurrent scenarios.
+        """
         chain = self._enhanced_chain
         if chain is not None:
             return chain
@@ -177,11 +257,30 @@ class RAGService:
                 return None
 
     def get_enhanced_chain(self) -> Optional[EnhancedRAGChain]:
-        """Return a cached enhanced chain, creating it on demand."""
+        """Get the enhanced RAG chain, initializing it if necessary.
+        
+        Returns:
+            An initialized EnhancedRAGChain instance, or None if initialization fails.
+            
+        Note:
+            This is a convenience method that delegates to _ensure_chain()
+            and is safe to call from multiple threads.
+        """
         return self._ensure_chain()
 
     async def warmup(self) -> bool:
-        """Background warmup to prepare the enhanced chain without blocking requests."""
+        """Warm up the RAG service by initializing the chain in the background.
+        
+        This method is intended to be called during application startup to
+        initialize the RAG chain and load documents before handling requests.
+        
+        Returns:
+            bool: True if warmup was successful, False otherwise.
+            
+        Note:
+            This method runs the initialization in a separate thread to avoid
+            blocking the event loop.
+        """
         loop = asyncio.get_running_loop()
         start = time.perf_counter()
         chain = await loop.run_in_executor(None, self._ensure_chain)

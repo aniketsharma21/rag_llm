@@ -1,8 +1,16 @@
-"""
-logging_config.py
+"""Enhanced logging configuration with structured logging support.
 
-Enhanced logging configuration with structured logging support.
-Provides JSON logging for production and human-readable logs for development.
+This module provides a comprehensive logging configuration for the RAG LLM application,
+featuring structured logging with JSON format in production and human-readable output
+in development. It includes utilities for request tracing, error logging, and performance
+monitoring.
+
+Key Features:
+- JSON-formatted logs in production, human-readable in development
+- Request context tracking
+- Performance monitoring
+- Error handling with rich context
+- Structured logging with structlog
 """
 
 import os
@@ -157,7 +165,23 @@ def log_performance(operation: str, duration: float, **kwargs) -> Dict[str, Any]
 
 
 def set_request_context(request_id: str = None, client_ip: str = None, user_agent: str = None) -> None:
-    """Bind request-level context variables for structured logging."""
+    """Bind request-level context variables for structured logging.
+    
+    This function adds request-specific information to the logging context, which will be
+    included in all subsequent log entries until cleared.
+    
+    Args:
+        request_id: Unique identifier for the request
+        client_ip: IP address of the client making the request
+        user_agent: User-Agent header from the HTTP request
+        
+    Example:
+        >>> set_request_context(
+        ...     request_id="req-123",
+        ...     client_ip="192.168.1.1",
+        ...     user_agent="Mozilla/5.0"
+        ... )
+    """
     context = {}
     if request_id:
         context["request_id"] = request_id
@@ -170,7 +194,14 @@ def set_request_context(request_id: str = None, client_ip: str = None, user_agen
 
 
 def clear_request_context() -> None:
-    """Clear any bound request context variables."""
+    """Clear any bound request context variables.
+    
+    This should typically be called at the end of a request to prevent context
+    leakage between requests.
+    
+    Example:
+        >>> clear_request_context()  # Clears all bound context variables
+    """
     clear_contextvars()
 
 
@@ -183,7 +214,38 @@ def request_log_entry(
     request_id: str | None = None,
     client_ip: str | None = None,
 ) -> Dict[str, Any]:
-    """Structured payload for request trace logs."""
+    """Create a structured log entry for HTTP request tracing.
+    
+    This function generates a standardized log entry for HTTP requests that includes
+    timing, status, and request identification information.
+    
+    Args:
+        method: HTTP method (GET, POST, etc.)
+        path: Request path
+        status_code: HTTP status code
+        duration_seconds: Request processing time in seconds
+        request_id: Optional unique request identifier
+        client_ip: Optional client IP address
+        
+    Returns:
+        A dictionary containing the structured log data with the following keys:
+        - event: Always "http_request"
+        - method: HTTP method
+        - path: Request path
+        - status_code: HTTP status code
+        - duration_seconds: Request duration in seconds (rounded to 6 decimal places)
+        - request_id: The request ID if provided
+        - client_ip: The client IP if provided
+        
+    Example:
+        >>> log_entry = request_log_entry(
+        ...     method="GET",
+        ...     path="/api/data",
+        ...     status_code=200,
+        ...     duration_seconds=0.1234567,
+        ...     request_id="req-123"
+        ... )
+    """
     payload: Dict[str, Any] = {
         "event": "http_request",
         "method": method,

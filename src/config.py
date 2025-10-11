@@ -1,4 +1,25 @@
-"""Centralized configuration management using Pydantic settings."""
+"""Centralized configuration management using Pydantic settings.
+
+This module provides a centralized configuration system that loads settings from
+multiple sources with the following precedence order:
+1. Environment variables
+2. config.yaml file
+3. Default values defined in the code
+
+Configuration includes:
+- API keys and service endpoints
+- Model and embedding configurations
+- File system paths
+- Retrieval and generation parameters
+
+Example config.yaml:
+    ```yaml
+    openai_api_key: "your-key-here"
+    llm_model: "gpt-4"
+    chunk_size: 1000
+    chunk_overlap: 200
+    ```
+"""
 
 from __future__ import annotations
 
@@ -23,6 +44,20 @@ _CONFIG_YAML_PATH_DEFAULT = _BASE_DIR_DEFAULT / "config.yaml"
 
 
 def _load_yaml_defaults(path: Path) -> Dict[str, Any]:
+    """Load configuration defaults from a YAML file.
+    
+    Args:
+        path: Path to the YAML configuration file.
+        
+    Returns:
+        Dict containing the loaded configuration with lowercase keys, or an empty
+        dict if the file doesn't exist or is invalid.
+        
+    Note:
+        - Silently handles missing files and invalid YAML
+        - Converts all keys to lowercase for case-insensitive access
+        - Logs warnings for any issues encountered
+    """
     if not path.exists():
         return {}
 
@@ -119,6 +154,19 @@ class AppSettings(BaseSettings):
 
 
 def _mask_value(key: str, value: Any) -> Any:
+    """Mask sensitive values in configuration for logging.
+    
+    Args:
+        key: Configuration key name
+        value: Configuration value to potentially mask
+        
+    Returns:
+        The original value, or a masked version if the key indicates sensitive data.
+        
+    Note:
+        - Masks any value where the key contains 'api_key' or matches known sensitive keys
+        - Truncates long string values (over 64 chars) for readability
+    """
     if value is None:
         return None
     sensitive_keys = {"api_key", "openai_api_key", "groq_api_key", "embedding_api_key"}
@@ -130,6 +178,16 @@ def _mask_value(key: str, value: Any) -> Any:
 
 
 def _log_effective_settings(settings: AppSettings) -> None:
+    """Log the effective configuration settings with sensitive data masked.
+    
+    Args:
+        settings: The AppSettings instance to log
+        
+    Note:
+        - Masks sensitive data before logging
+        - Shows the effective configuration after all overrides are applied
+        - Logs the precedence order for configuration sources
+    """
     values = settings.model_dump()
     sanitized = {key: _mask_value(key, value) for key, value in values.items()}
     logger.info(
@@ -141,6 +199,16 @@ def _log_effective_settings(settings: AppSettings) -> None:
 
 @lru_cache()
 def get_settings() -> AppSettings:
+    """Get the application settings with caching.
+    
+    Returns:
+        AppSettings: The application configuration
+        
+    Note:
+        - Uses LRU caching to avoid reloading settings
+        - Logs the effective configuration on first load
+        - Subsequent calls return the cached instance
+    """
     settings = AppSettings()
     _log_effective_settings(settings)
     return settings

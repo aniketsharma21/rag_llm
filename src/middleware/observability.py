@@ -1,4 +1,9 @@
-"""Observability middleware for request tracing and Prometheus metrics."""
+"""Observability middleware for request tracing and Prometheus metrics.
+
+This module provides middleware and utilities for monitoring and observability in the RAG LLM application.
+It includes request tracking, metrics collection, and error monitoring using Prometheus metrics
+and structured logging.
+"""
 from __future__ import annotations
 
 from time import perf_counter
@@ -66,6 +71,14 @@ RAG_ERRORS = Counter(
 
 
 def _resolve_route_path(request: Request) -> str:
+    """Extract the route path from a request object.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        str: The resolved route path or URL path if route is not available.
+    """
     route = request.scope.get("route")
     if route and getattr(route, "path", None):
         return route.path  # type: ignore[attr-defined]
@@ -73,11 +86,33 @@ def _resolve_route_path(request: Request) -> str:
 
 
 class RequestMetricsMiddleware(BaseHTTPMiddleware):
+    """Middleware for collecting HTTP request metrics and logging.
+
+    This middleware tracks:
+    - Request count by method, path, and status code
+    - Request latency
+    - In-progress request count
+    - Request context for structured logging
+    """
+
     async def dispatch(
         self,
         request: Request,
         call_next: Callable[[Request], StarletteResponse],
     ) -> StarletteResponse:
+        """Process an incoming HTTP request and collect metrics.
+
+        Args:
+            request: The incoming HTTP request.
+            call_next: Callable to proceed with request processing.
+
+        Returns:
+            StarletteResponse: The HTTP response.
+        
+        Note:
+            Automatically captures and logs request details including duration,
+            status code, and request context.
+        """
         REQUEST_IN_PROGRESS.inc()
         start_time = perf_counter()
         status_code = 500
@@ -114,7 +149,19 @@ class RequestMetricsMiddleware(BaseHTTPMiddleware):
 
 
 def setup_observability(app: FastAPI) -> None:
-    """Configure observability middleware and metrics endpoint."""
+    """Configure observability middleware and metrics endpoint.
+    
+    This function:
+    - Adds the RequestMetricsMiddleware to the FastAPI app
+    - Sets up a /metrics endpoint for Prometheus scraping
+    - Ensures idempotent setup with state tracking
+    
+    Args:
+        app: The FastAPI application instance to configure.
+        
+    Note:
+        Safe to call multiple times; will only configure once per app instance.
+    """
 
     if getattr(app.state, "observability_configured", False):
         return
@@ -131,7 +178,20 @@ def setup_observability(app: FastAPI) -> None:
 
 
 def observe_rag_retrieval(*, duration_seconds: float, document_count: int, mode: str) -> None:
-    """Record retrieval metrics for observability dashboards."""
+    """Record retrieval metrics for observability dashboards.
+    
+    Tracks the performance of document retrieval operations in the RAG pipeline.
+    
+    Args:
+        duration_seconds: Time taken for the retrieval operation in seconds.
+        document_count: Number of documents retrieved.
+        mode: The retrieval mode used (e.g., 'semantic', 'keyword', 'hybrid').
+        
+    Note:
+        Metrics are collected under the following names:
+        - rag_retrieval_duration_seconds: Histogram of retrieval times by mode
+        - rag_retrieved_documents_count: Histogram of document counts by mode
+    """
 
     sanitized_mode = mode or "unknown"
     try:
@@ -148,7 +208,22 @@ def observe_rag_generation(
     duration_seconds: float,
     token_usage: Dict[str, int] | None = None,
 ) -> None:
-    """Record LLM generation metrics including latency and token usage."""
+    """Record LLM generation metrics including latency and token usage.
+    
+    Tracks the performance and resource usage of LLM generation operations.
+    
+    Args:
+        provider: The LLM provider (e.g., 'openai', 'huggingface').
+        model: The specific model name/identifier.
+        duration_seconds: Time taken for generation in seconds.
+        token_usage: Optional dictionary of token counts by token type.
+            Common keys include 'prompt_tokens', 'completion_tokens', 'total_tokens'.
+            
+    Note:
+        Metrics are collected under the following names:
+        - rag_generation_duration_seconds: Histogram of generation times by provider and model
+        - rag_generation_tokens_total: Counter of token usage by type, provider, and model
+    """
 
     sanitized_provider = (provider or "unknown").lower()
     sanitized_model = model or "unknown"
@@ -164,7 +239,18 @@ def observe_rag_generation(
 
 
 def increment_rag_error(*, component: str, exception_type: str) -> None:
-    """Increment error counter for a RAG component."""
+    """Increment error counter for a RAG component.
+    
+    Tracks error occurrences in the RAG pipeline by component and exception type.
+    
+    Args:
+        component: The component where the error occurred (e.g., 'retrieval', 'generation').
+        exception_type: The type/class of the exception that was raised.
+        
+    Note:
+        Metrics are collected under 'rag_pipeline_errors_total' counter with
+        'component' and 'exception_type' labels.
+    """
 
     sanitized_component = component or "unknown"
     sanitized_exception = exception_type or "UnknownException"

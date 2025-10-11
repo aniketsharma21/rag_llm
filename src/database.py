@@ -1,8 +1,29 @@
-"""
-database.py
+"""Database models and connection management for the RAG application.
 
-Database models and connection management for conversation persistence.
-Uses SQLAlchemy with SQLite for local development and easy deployment.
+This module provides SQLAlchemy models and database utilities for persisting
+conversations and document metadata. It supports both SQLite (default) and
+PostgreSQL for production deployments.
+
+Key Components:
+- SQLAlchemy ORM models for conversations and documents
+- Database connection and session management
+- Repository pattern implementations for data access
+- Schema migrations support via Alembic
+
+Environment Variables:
+    DATABASE_URL: Connection string for the database (defaults to SQLite)
+    
+Example:
+    ```python
+    # Get a database session
+    with get_db_session() as session:
+        # Use the session
+        conv = session.query(Conversation).first()
+    
+    # Use the repository pattern
+    manager = ConversationManager()
+    conversations = manager.list_conversations(limit=10)
+    ```
 """
 
 import os
@@ -29,7 +50,17 @@ Base = declarative_base()
 
 
 class Conversation(Base):
-    """Database model for storing conversations."""
+    """SQLAlchemy model representing a conversation in the database.
+    
+    Attributes:
+        id: Primary key, auto-incrementing integer
+        user_id: Identifier for the user who owns the conversation
+        title: Human-readable title for the conversation
+        messages: JSON-encoded list of message dictionaries
+        created_at: Timestamp when the conversation was created
+        updated_at: Timestamp when the conversation was last updated
+        is_active: Soft delete flag
+    """
     
     __tablename__ = "conversations"
     
@@ -55,7 +86,24 @@ class Conversation(Base):
 
 
 class Document(Base):
-    """Database model for tracking uploaded documents."""
+    """SQLAlchemy model for tracking uploaded and processed documents.
+    
+    This model stores metadata about documents that have been uploaded to the
+    system, including their processing status and location.
+    
+    Attributes:
+        id: Primary key, auto-incrementing integer
+        filename: System-generated filename (UUID)
+        original_filename: Original filename from the upload
+        file_path: Filesystem path to the stored document
+        file_size: Size of the file in bytes
+        file_type: MIME type of the file
+        checksum: SHA-256 checksum for deduplication
+        chunks_count: Number of text chunks after processing
+        uploaded_at: Timestamp of when the file was uploaded
+        processed_at: Timestamp of when processing completed
+        is_processed: Flag indicating if processing is complete
+    """
     
     __tablename__ = "documents"
     
@@ -89,7 +137,15 @@ class Document(Base):
 
 
 def create_tables():
-    """Create all database tables."""
+    """Create all database tables if they don't exist.
+    
+    This function is called on module import to ensure the database schema
+    is up-to-date. In production, use migrations instead.
+    
+    Note:
+        For production deployments, prefer using Alembic migrations instead
+        of this function to manage schema changes.
+    """
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created successfully")
@@ -100,7 +156,22 @@ def create_tables():
 
 @contextmanager
 def get_db_session():
-    """Context manager for database sessions."""
+    """Context manager that provides a database session.
+    
+    Yields:
+        Session: A SQLAlchemy database session.
+        
+    Example:
+        ```python
+        with get_db_session() as session:
+            # Use the session
+            result = session.query(MyModel).all()
+        ```
+        
+    Note:
+        The session is automatically committed if no exceptions occur,
+        or rolled back if an exception is raised.
+    """
     session = SessionLocal()
     try:
         yield session

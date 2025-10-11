@@ -1,4 +1,17 @@
-"""Service abstractions for document ingestion workflows."""
+"""Service abstractions for document ingestion workflows.
+
+This module provides the IngestionService class which handles the document ingestion
+pipeline including file uploads, processing, and vector store updates. It integrates
+with the task queue for asynchronous processing and maintains job status tracking.
+
+Key Features:
+- Asynchronous file upload and processing
+- Job status tracking and management
+- Document deduplication via checksums
+- Integration with vector store for embeddings
+- Background task scheduling and cancellation
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -21,13 +34,39 @@ logger = get_logger(__name__)
 
 
 class IngestionService:
-    """Encapsulates document ingestion logic for reuse across transports."""
+    """Service for managing document ingestion workflows in the RAG pipeline.
+    
+    This service handles the end-to-end process of document ingestion including:
+    - File upload and validation
+    - Background job scheduling
+    - Document processing and chunking
+    - Vector store updates
+    - Job status tracking
+    
+    Attributes:
+        _task_queue: AsyncTaskQueue instance for managing background jobs.
+    """
 
     def __init__(self, task_queue: Optional[AsyncTaskQueue] = None) -> None:
+        """Initialize the IngestionService with an optional task queue.
+        
+        Args:
+            task_queue: Optional AsyncTaskQueue instance. If not provided, a new one
+                will be created. This allows sharing a task queue across services.
+        """
         os.makedirs(RAW_DATA_DIR, exist_ok=True)
         self._task_queue = task_queue or AsyncTaskQueue()
 
     def _cleanup_file(self, file_path: str) -> None:
+        """Safely remove a file if it exists.
+        
+        Args:
+            file_path: Path to the file to be removed.
+            
+        Note:
+            This method is safe to call even if the file doesn't exist or has been
+            removed already. Any errors during removal are logged but not propagated.
+        """
         if not file_path:
             return
         try:
@@ -42,7 +81,27 @@ class IngestionService:
             )
 
     async def enqueue_upload(self, file: UploadFile) -> Tuple[str, str]:
-        """Persist the upload and register a background job."""
+        """Process an uploaded file and enqueue it for background processing.
+        
+        This method performs the following steps:
+        1. Reads the uploaded file content
+        2. Generates a unique job ID
+        3. Saves the file to persistent storage
+        4. Creates database records for tracking
+        5. Returns the job ID and file path
+        
+        Args:
+            file: FastAPI UploadFile instance containing the uploaded file.
+            
+        Returns:
+            A tuple containing (job_id, file_path) where:
+            - job_id: Unique identifier for tracking the ingestion job
+            - file_path: Path where the uploaded file was saved
+            
+        Raises:
+            IOError: If there's an error saving the file.
+            DatabaseError: If there's an error creating the database records.
+        """
         payload = await file.read()
 
         job_id = str(uuid.uuid4())
@@ -90,7 +149,21 @@ class IngestionService:
         *,
         on_success: Optional[Callable[[Dict[str, Any]], Awaitable[None] | None]] = None,
     ) -> asyncio.Task[None]:
-        """Schedule processing on the internal task queue."""
+        """Schedule document processing in the background.
+        
+        Args:
+            job_id: Unique identifier for the job.
+            file_path: Path to the file to be processed.
+            on_success: Optional async callback to be called when processing completes
+                successfully. The callback receives the job result as an argument.
+                
+        Returns:
+            asyncio.Task representing the scheduled job.
+            
+        Note:
+            The task is automatically added to the internal task queue. Any exceptions
+            during processing are logged but won't crash the application.
+        """
 
         async def _runner() -> None:
             try:
@@ -111,11 +184,45 @@ class IngestionService:
         return self._task_queue.submit(job_id, _runner)
 
     def cancel_job(self, job_id: str) -> bool:
-        """Cancel a scheduled ingestion job if it has not completed."""
+        """Attempt to cancel a scheduled ingestion job.
+        
+        Args:
+            job_id: The ID of the job to cancel.
+            
+        Returns:
+            bool: True if the job was found and cancelled, False otherwise.
+            
+        Note:
+            This method can only cancel jobs that have not started processing.
+            Already running jobs will complete normally.
+        """
         return self._task_queue.cancel(job_id)
 
     async def process_job(self, job_id: str, file_path: str) -> Dict[str, Optional[int]]:
-        """Process a queued ingestion job and update status records."""
+        """Process an ingestion job by chunking the document and updating the vector store.
+        
+        This method performs the core document processing workflow:
+        1. Updates job status to 'processing'
+        2. Processes the document into chunks
+        3. Updates the vector store with document chunks
+        4. Updates job status to 'completed' or 'failed'
+        
+        Args:
+            job_id: Unique identifier for the job.
+            file_path: Path to the file to be processed.
+            
+        Returns:
+            Dictionary containing processing results with keys:
+            - chunks_processed: Number of chunks created (0 if skipped)
+            - status: One of 'completed', 'skipped', or 'failed'
+            
+        Raises:
+            ValueError: If the job record is not found.
+            
+        Note:
+            This method handles its own error logging and status updates.
+            Callers should typically use schedule_job() instead of calling this directly.
+        """
         details: Dict[str, Any] = {}
         try:
             async with get_session() as session:

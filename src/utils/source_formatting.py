@@ -1,4 +1,15 @@
-"""Utilities for formatting and normalizing RAG source metadata and answers."""
+"""Utilities for formatting and normalizing RAG source metadata and answers.
+
+This module provides functions to process and format source documents and their metadata
+for display in the RAG pipeline. It handles tasks like source normalization,
+citation formatting, and answer text processing.
+
+Key Features:
+- Source metadata normalization
+- Superscript citation formatting
+- Answer text cleaning and formatting
+- Source attribution and display
+"""
 from __future__ import annotations
 
 import os
@@ -23,7 +34,18 @@ SUPERSCRIPT_MAP = {
 
 
 def format_superscript(number: int) -> str:
-    """Convert an integer into its superscript representation."""
+    """Convert an integer into its superscript representation.
+    
+    Args:
+        number: The integer to convert to superscript.
+        
+    Returns:
+        str: The number formatted as a superscript string.
+        
+    Example:
+        >>> format_superscript(123)
+        '¹²³'
+    """
     return "".join(SUPERSCRIPT_MAP.get(ch, ch) for ch in str(number))
 
 
@@ -33,7 +55,29 @@ def normalize_source_payload(
     default_confidence: Optional[float] = None,
     base_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Normalize heterogeneous source metadata into a consistent payload."""
+    """Normalize heterogeneous source metadata into a consistent payload.
+    
+    This function takes source metadata from various formats and normalizes it into
+    a consistent dictionary structure with standard field names and formats.
+    
+    Args:
+        source_data: Raw source metadata dictionary from the RAG pipeline.
+        index: Index of the source in the results (used for fallback citation).
+        default_confidence: Default confidence score if not provided in source_data.
+        base_dir: Base directory for resolving relative file paths.
+        
+    Returns:
+        Dict[str, Any]: Normalized source payload with consistent field names.
+        
+    The returned dictionary includes these standardized fields:
+        - source_display_path: Display-friendly path to the source
+        - source_display_name: Display name for the source
+        - snippet: Extracted text snippet from the source
+        - citation: Formatted citation (e.g., superscript number)
+        - page_number: Page number if available
+        - preview_url: URL for previewing the source
+        - url: Direct URL to access the source
+    """
     source = dict(source_data or {})
     metadata = dict(source.get("metadata", {}) or {})
 
@@ -141,7 +185,18 @@ def normalize_source_payload(
 
 
 def replace_bracket_citations(text: str) -> str:
-    """Replace numeric bracket citations like [1] with superscripts."""
+    """Replace numeric bracket citations like [1] with superscripts.
+    
+    Args:
+        text: Input text containing bracket citations.
+        
+    Returns:
+        str: Text with bracket citations converted to superscript.
+        
+    Example:
+        >>> replace_bracket_citations("See reference [1]")
+        'See reference ¹'
+    """
     if not text:
         return text
 
@@ -158,7 +213,19 @@ def apply_superscript_citations(
     sources: List[Dict[str, Any]],
     append_sources_block: bool = True,
 ) -> str:
-    """Apply superscript citations and optionally append a Sources block."""
+    """Apply superscript citations and optionally append a Sources block.
+    
+    Processes the answer text to add proper citation formatting and optionally
+    appends a formatted sources section at the end.
+    
+    Args:
+        answer: The answer text to process.
+        sources: List of source dictionaries with metadata.
+        append_sources_block: Whether to append the sources section.
+        
+    Returns:
+        str: Processed answer with formatted citations and sources.
+    """
     if not answer:
         return ""
 
@@ -199,7 +266,17 @@ def apply_superscript_citations(
 
 
 def clean_answer_text(answer: str) -> str:
-    """Normalize whitespace and remove trailing Sources blocks."""
+    """Normalize whitespace and remove trailing Sources blocks.
+    
+    Args:
+        answer: The answer text to clean.
+        
+    Returns:
+        str: Cleaned answer text with normalized whitespace and no trailing sources.
+        
+    Note:
+        This is useful for preparing text for display or further processing.
+    """
     if not answer:
         return ""
 
@@ -210,7 +287,18 @@ def clean_answer_text(answer: str) -> str:
 
 
 def split_answer_into_paragraphs(answer: str) -> List[str]:
-    """Split an answer into paragraphs for streaming/UX purposes."""
+    """Split an answer into paragraphs for streaming/UX purposes.
+    
+    Args:
+        answer: The answer text to split.
+        
+    Returns:
+        List[str]: List of paragraphs, where each paragraph is a string.
+        
+    Note:
+        This is particularly useful for streaming responses where you want to
+        show text progressively rather than all at once.
+    """
     if not answer:
         return []
     return [paragraph.strip() for paragraph in answer.split("\n\n") if paragraph.strip()]
