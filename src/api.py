@@ -27,7 +27,7 @@ import json
 import asyncio
 import time
 from typing import List, Optional, Dict, Any
-{{ ... }}
+
 from datetime import datetime
 import contextlib
 from contextlib import asynccontextmanager
@@ -354,22 +354,18 @@ async def health_check() -> HealthResponse:
         HTTPException: If any critical service is unavailable.
     """
     try:
-        job_id, file_path = await app_service.ingest_document(file)
-
-        return IngestResponse(
-            job_id=job_id,
-            status="queued",
-            message=f"Document '{file.filename}' received. Processing has started.",
-        )
-
+        # A more comprehensive health check can be added here
+        # For now, we check if the LLM provider is healthy
+        run_llm_health_check()
+        llm = get_llm()
+        model_name = getattr(llm, '_model_name', 'unknown')
+        return HealthResponse(status="ok", model=model_name)
     except Exception as exc:
-        logger.error("Error processing document", error=str(exc))
+        logger.error("Health check failed", error=str(exc))
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing document: {exc}",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Health check failed: {exc}",
         )
-    finally:
-        await file.close()
 
 
 @app.get("/status/{job_id}", response_model=JobStatusResponse)

@@ -259,6 +259,3 @@ def request_log_entry(
         payload["client_ip"] = client_ip
     return payload
 
-
-# Initialize logging when module is imported
-setup_logging()

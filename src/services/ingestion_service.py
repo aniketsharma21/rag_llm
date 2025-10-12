@@ -73,12 +73,13 @@ class IngestionService:
             if os.path.exists(file_path):
                 os.remove(file_path)
                 logger.debug("Removed staged upload", file_path=file_path)
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.warning(
+        except Exception as exc:
+            logger.error(
                 "Failed to remove staged upload",
                 file_path=file_path,
                 error=str(exc),
             )
+            raise RuntimeError(f"Failed to clean up file: {file_path}") from exc
 
     async def enqueue_upload(self, file: UploadFile) -> Tuple[str, str]:
         """Process an uploaded file and enqueue it for background processing.

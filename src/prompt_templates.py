@@ -169,8 +169,9 @@ class PromptManager:
         Returns:
             PromptTemplate instance
         """
-        cache_key = f"{template_type}_{hash(str(custom_variables))}"
-        
+        # Use frozenset(custom_variables.items()) to ensure consistent hashing
+        cache_key = f"{template_type}_{hash(frozenset(custom_variables.items()) if custom_variables else frozenset())}"
+
         if cache_key in self.template_cache:
             return self.template_cache[cache_key]
         

@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 
@@ -61,7 +61,7 @@ def repo_stubs(monkeypatch):
                 return False
             record["chunks_count"] = chunks_count
             record["is_processed"] = True
-            record["processed_at"] = datetime.now(UTC)
+            record["processed_at"] = datetime.now(timezone.utc)
             return True
 
     class StubJobRepository:
@@ -84,8 +84,8 @@ def repo_stubs(monkeypatch):
                 "message": message,
                 "details": details or {},
                 "error": None,
-                "created_at": datetime.now(UTC),
-                "updated_at": datetime.now(UTC),
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc),
             }
             jobs[job_id] = record
             return record
@@ -113,7 +113,7 @@ def repo_stubs(monkeypatch):
                 record["details"].update(details)
             if error is not None:
                 record["error"] = error
-            record["updated_at"] = datetime.now(UTC)
+            record["updated_at"] = datetime.now(timezone.utc)
             return record
 
     @asynccontextmanager

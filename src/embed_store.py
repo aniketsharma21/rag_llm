@@ -176,7 +176,7 @@ def get_embedding_model() -> Any:
 
 
 def build_vector_store(chunks):
-    """Build a new Chroma vector store from document chunks and persist metadata."""
+    """Append new document chunks to the existing Chroma vector store or create a new one."""
 
     if not chunks:
         logger.warning("No chunks provided to build vector store.")
@@ -184,18 +184,29 @@ def build_vector_store(chunks):
 
     embeddings = get_embedding_model()
     try:
-        vectordb = Chroma.from_documents(
-            documents=chunks,
-            embedding=embeddings,
-            persist_directory=CHROMA_PERSIST_DIR,
-        )
-        logger.info("Vector store built and persisted", chunks_count=len(chunks))
+        # Check if the vector store already exists
+        if os.path.exists(CHROMA_PERSIST_DIR):
+            vectordb = Chroma(
+                persist_directory=CHROMA_PERSIST_DIR,
+                embedding_function=embeddings
+            )
+            vectordb.add_documents(documents=chunks)
+            logger.info("Appended new chunks to existing vector store.", chunks_count=len(chunks))
+        else:
+            vectordb = Chroma.from_documents(
+                documents=chunks,
+                embedding=embeddings,
+                persist_directory=CHROMA_PERSIST_DIR,
+            )
+            logger.info("Created new vector store and added chunks.", chunks_count=len(chunks))
+
+        vectordb.persist()
         _persist_embedding_config(_current_embedding_signature())
         return vectordb
     except Exception as exc:
-        logger.error("Failed to build vector store", chunks_count=len(chunks), error=str(exc))
+        logger.error("Failed to build or update vector store", chunks_count=len(chunks), error=str(exc))
         raise VectorStoreError(
-            f"Failed to build vector store: {exc}",
+            f"Failed to build or update vector store: {exc}",
             {"chunks_count": len(chunks), "error": str(exc)},
         ) from exc
 

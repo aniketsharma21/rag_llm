@@ -275,6 +275,26 @@ class EnhancedRAGChain:
             logger.warning("Failed to initialize advanced retriever", error=str(e))
             self.advanced_retriever = None
         
+    def _handle_direct_query(self, question: str) -> Optional[Dict[str, Any]]:
+        """
+        Check for and handle direct queries that don't require RAG.
+        """
+        # Case-insensitive check for date-related questions
+        if "date" in question.lower() and "today" in question.lower():
+            from datetime import datetime
+            current_date = datetime.now().strftime("%A, %B %d, %Y")
+            answer = f"Today's date is {current_date}."
+            logger.info("Handling direct query for today's date")
+            return {
+                "answer": answer,
+                "sources": [],
+                "confidence_score": 1.0,
+                "template_used": "direct_query",
+                "num_sources": 0,
+                "retrieval_stats": {}
+            }
+        return None
+
     def query(
         self,
         question: str,
@@ -300,6 +320,11 @@ class EnhancedRAGChain:
         Returns:
             Dictionary with answer, sources, and metadata
         """
+        # Check for direct queries first
+        direct_result = self._handle_direct_query(question)
+        if direct_result:
+            return direct_result
+            
         try:
             history = chat_history or []
             use_context = bool(history) and conversation_context
