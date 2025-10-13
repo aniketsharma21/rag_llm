@@ -246,29 +246,31 @@ class EnhancedRAGChain:
         self.documents = documents
         self.conversation_history: List[Dict[str, Any]] = []
 
+        config = {
+            "semantic_weight": retriever_semantic_weight,
+            "keyword_weight": retriever_keyword_weight,
+            "k": retriever_k,
+        }
+
         # Initialize hybrid retriever
         try:
             self.retriever = HybridRetriever(
                 vector_store,
                 documents,
-                semantic_weight=retriever_semantic_weight,
-                keyword_weight=retriever_keyword_weight,
-                k=retriever_k,
+                config=config,
             )
             logger.info("Initialized hybrid retriever", num_documents=len(documents))
         except Exception as e:
             logger.error("Failed to initialize hybrid retriever", error=str(e))
             # Fallback to vector retriever only
-            self.retriever = vector_store.as_retriever()
+            self.retriever = vector_store.as_retriever(search_kwargs={'k': retriever_k})
         
         # Initialize advanced retriever for context-aware queries
         try:
             self.advanced_retriever = AdvancedRetriever(
                 vector_store,
                 documents,
-                semantic_weight=retriever_semantic_weight,
-                keyword_weight=retriever_keyword_weight,
-                k=retriever_k,
+                config=config,
             )
             logger.info("Initialized advanced retriever")
         except Exception as e:
@@ -347,7 +349,13 @@ class EnhancedRAGChain:
                     k=retriever_overrides.get("k") if retriever_overrides else k,
                 )
             else:
-                documents = retriever.retrieve(question, k=retriever_overrides.get("k") if retriever_overrides else k)
+                retriever_k_to_use = retriever_overrides.get("k") if retriever_overrides else k
+                if hasattr(retriever, "retrieve"):
+                    documents = retriever.retrieve(question, k=retriever_k_to_use)
+                else:
+                    documents = retriever.get_relevant_documents(question)
+                    if retriever_k_to_use:
+                        documents = documents[:retriever_k_to_use]
 
             retrieval_duration = time.perf_counter() - retrieval_start
             observe_rag_retrieval(
@@ -508,12 +516,17 @@ class EnhancedRAGChain:
         k = overrides.get("k", RETRIEVER_K)
         if semantic_weight is None and keyword_weight is None:
             return self.retriever
+
+        config = {
+            "semantic_weight": semantic_weight or RETRIEVER_SEMANTIC_WEIGHT,
+            "keyword_weight": keyword_weight or RETRIEVER_KEYWORD_WEIGHT,
+            "k": k,
+        }
+
         return HybridRetriever(
             self.vector_store,
             self.documents,
-            semantic_weight=semantic_weight or RETRIEVER_SEMANTIC_WEIGHT,
-            keyword_weight=keyword_weight or RETRIEVER_KEYWORD_WEIGHT,
-            k=k,
+            config=config,
         )
 
     def _resolve_llm(self, overrides: Optional[Dict[str, Any]]):

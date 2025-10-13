@@ -48,8 +48,7 @@ from src.exceptions import (
     ValidationError,
     ConversationError,
 )
-from src.db.repositories import ConversationRepository, JobRepository
-from src.db.session import get_session, init_database
+from src.db.session import init_database
 from src.services.ingestion_service import IngestionService
 from src.services.rag_service import RAGService, RAGApplicationService
 from src.middleware.observability import setup_observability
@@ -63,7 +62,7 @@ app_service = RAGApplicationService(ingestion_service, rag_service)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):  # pragma: no cover - framework integration
+async def lifespan(_app: FastAPI):  # pragma: no cover - framework integration
     await init_database()
     warmup_task: Optional[asyncio.Task] = None
     try:
@@ -127,7 +126,7 @@ app.add_middleware(
 
 # Exception Handlers
 @app.exception_handler(DocumentProcessingError)
-async def document_processing_exception_handler(request: Request, exc: DocumentProcessingError):
+async def document_processing_exception_handler(_request: Request, exc: DocumentProcessingError):
     logger.error("Document processing error", error=str(exc), details=exc.details)
     return JSONResponse(
         status_code=422,
@@ -139,7 +138,7 @@ async def document_processing_exception_handler(request: Request, exc: DocumentP
     )
 
 @app.exception_handler(VectorStoreError)
-async def vector_store_exception_handler(request: Request, exc: VectorStoreError):
+async def vector_store_exception_handler(_request: Request, exc: VectorStoreError):
     logger.error("Vector store error", error=str(exc), details=exc.details)
     return JSONResponse(
         status_code=500,
@@ -151,7 +150,7 @@ async def vector_store_exception_handler(request: Request, exc: VectorStoreError
     )
 
 @app.exception_handler(LLMError)
-async def llm_exception_handler(request: Request, exc: LLMError):
+async def llm_exception_handler(_request: Request, exc: LLMError):
     logger.error("LLM error", error=str(exc), details=exc.details)
     return JSONResponse(
         status_code=503,
@@ -163,7 +162,7 @@ async def llm_exception_handler(request: Request, exc: LLMError):
     )
 
 @app.exception_handler(ValidationError)
-async def validation_exception_handler(request: Request, exc: ValidationError):
+async def validation_exception_handler(_request: Request, exc: ValidationError):
     logger.warning("Validation error", error=str(exc), details=exc.details)
     return JSONResponse(
         status_code=400,
@@ -175,7 +174,7 @@ async def validation_exception_handler(request: Request, exc: ValidationError):
     )
 
 @app.exception_handler(ConversationError)
-async def conversation_exception_handler(request: Request, exc: ConversationError):
+async def conversation_exception_handler(_request: Request, exc: ConversationError):
     logger.error("Conversation error", error=str(exc), details=exc.details)
     return JSONResponse(
         status_code=500,
@@ -187,7 +186,7 @@ async def conversation_exception_handler(request: Request, exc: ConversationErro
     )
 
 @app.exception_handler(RAGException)
-async def rag_exception_handler(request: Request, exc: RAGException):
+async def rag_exception_handler(_request: Request, exc: RAGException):
     logger.error("RAG pipeline error", error=str(exc), details=exc.details)
     return JSONResponse(
         status_code=500,
@@ -318,7 +317,8 @@ class ConnectionManager:
         if task and not task.done():
             task.cancel()
 
-    async def send_personal_message(self, message: str, websocket: WebSocket):
+    @staticmethod
+    async def send_personal_message(message: str, websocket: WebSocket):
         await websocket.send_text(message)
 
     async def broadcast(self, message: str):
@@ -366,6 +366,38 @@ async def health_check() -> HealthResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Health check failed: {exc}",
         )
+
+
+@app.post("/ingest", response_model=IngestResponse)
+async def ingest_document(file: UploadFile = File(...)):
+    """
+    Uploads and processes a document for ingestion into the RAG pipeline.
+
+    This endpoint accepts a file, saves it to a temporary location, and
+    initiates an asynchronous ingestion process.
+
+    Args:
+        file: The document to be ingested, sent as a multipart form upload.
+
+    Returns:
+        IngestResponse: An object containing the job ID and status of the ingestion process.
+
+    Raises:
+        HTTPException: If the file upload fails or the ingestion process cannot be started.
+    """
+    try:
+        job_id, _ = await app_service.ingest_document(file)
+        return IngestResponse(
+            job_id=job_id,
+            status="started",
+            message="Document ingestion started successfully.",
+        )
+    except DocumentProcessingError as exc:
+        logger.error("Error during document ingestion", error=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        logger.error("Unexpected error during ingestion", error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to start ingestion job")
 
 
 @app.get("/status/{job_id}", response_model=JobStatusResponse)
@@ -549,27 +581,43 @@ async def websocket_endpoint(websocket: WebSocket):
     Raises:
         WebSocketDisconnect: When the client disconnects or an error occurs.
     """
+    await manager.connect(websocket)
+    logger.info("New WebSocket connection", client=str(getattr(websocket, "client", "unknown")))
+
+    await manager.send_personal_message(
+        json.dumps({"type": "status", "status": "connected"}),
+        websocket,
+    )
+
+    # Add periodic ping to keep connection alive
+    async def send_periodic_ping():
+        try:
+            while True:
+                await asyncio.sleep(30)  # Ping every 30 seconds
+                await manager.send_personal_message(
+                    json.dumps({"type": "ping"}),
+                    websocket,
+                )
+        except (asyncio.CancelledError, WebSocketDisconnect):
+            pass  # Task was cancelled, which is expected on disconnect
+        except Exception as e:
+            logger.warning(f"Error in ping task: {e}")
+
+    ping_task = asyncio.create_task(send_periodic_ping())
+
     try:
-        await manager.connect(websocket)
-        logger.info("New WebSocket connection", client=str(getattr(websocket, "client", "unknown")))
-
-        await manager.send_personal_message(
-            json.dumps({"type": "status", "status": "connected"}),
-            websocket,
-        )
-
         while True:
             try:
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=300)
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=300.0)
             except asyncio.TimeoutError:
-                logger.warning("WebSocket receive timeout", client=str(getattr(websocket, "client", "unknown")))
+                logger.warning("WebSocket timeout", client=str(getattr(websocket, "client", "unknown")))
                 await manager.send_personal_message(
-                    json.dumps({"type": "error", "message": "Connection timeout"}),
+                    json.dumps({"type": "error", "message": "Connection timeout. Closing connection."}),
                     websocket,
                 )
                 break
             except WebSocketDisconnect:
-                logger.info("WebSocket client disconnected", client=str(getattr(websocket, "client", "unknown")))
+                logger.info("WebSocket disconnected", client=str(getattr(websocket, "client", "unknown")))
                 break
 
             try:
@@ -658,16 +706,19 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as exc:
         logger.error("WebSocket connection error", error=str(exc), exc_info=True)
     finally:
-        try:
-            task = manager.get_task(websocket)
-            if task and not task.done():
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-            manager.disconnect(websocket)
-            logger.info("WebSocket connection closed", client=str(getattr(websocket, "client", "unknown")))
-        except Exception as exc:
-            logger.error("Error closing WebSocket", error=str(exc))
+        ping_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await ping_task
+            
+        task = manager.get_task(websocket)
+        if task and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        
+        manager.disconnect(websocket)
+        logger.info("WebSocket connection closed", client=str(getattr(websocket, "client", "unknown")))
+
 
 # File management endpoints
 @app.get("/files/preview/{filename}")

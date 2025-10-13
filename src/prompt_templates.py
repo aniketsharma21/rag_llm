@@ -14,18 +14,44 @@ import os
 logger = structlog.get_logger(__name__)
 
 # Tokenizer for safe truncation (fallback if unavailable)
+tokenizer = None
+HUGGING_FACE_TOKEN = os.environ.get("HUGGING_FACE_TOKEN")
+
 try:
-    os.environ["PYTHONIOENCODING"] = "utf-8"
+    logger.info("Attempting to load a standard open-source tokenizer (gpt2).")
+    # Use a widely available tokenizer like 'gpt2' as the primary choice
     tokenizer = AutoTokenizer.from_pretrained(
-        "openai/gpt-oss-120b",
+        "gpt2",
         trust_remote_code=True,
-        local_files_only=False
     )
+    logger.info("Successfully loaded gpt2 tokenizer.")
+
 except Exception as e:
-    print(f"Tokenizer loading failed: {e}. Falling back to None.")
-    tokenizer = None
-finally:
-    os.environ.pop("PYTHONIOENCODING", None)
+    logger.warning("Primary tokenizer (gpt2) load failed, retrying with LLaMA tokenizer.", error=str(e))
+
+    try:
+        if not HUGGING_FACE_TOKEN:
+            logger.warning(
+                "HUGGING_FACE_TOKEN environment variable not set. "
+                "This is required to download gated models like LLaMA."
+            )
+        
+        logger.info("Attempting to load LLaMA tokenizer.")
+        # Retry with a compatible LLaMA tokenizer, using an auth token
+        tokenizer = AutoTokenizer.from_pretrained(
+            "meta-llama/Meta-Llama-3-8B-Instruct",
+            trust_remote_code=True,
+            token=HUGGING_FACE_TOKEN,
+        )
+        logger.info("Loaded fallback tokenizer: meta-llama/Meta-Llama-3-8B-Instruct.")
+
+    except Exception as e2:
+        logger.warning(
+            "Fallback tokenizer load failed; using character-based truncation. "
+            "Ensure HUGGING_FACE_TOKEN is set correctly for gated models.",
+            error=str(e2)
+        )
+        tokenizer = None
 
 SUPERSCRIPT_MAP = {
     "0": "⁰",
