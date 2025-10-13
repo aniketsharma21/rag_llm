@@ -92,8 +92,8 @@ class AppSettings(BaseSettings):
     top_k: int = Field(default=_YAML_DEFAULTS.get("top_k", 5))
 
     llm_provider: str = Field(default=_YAML_DEFAULTS.get("llm_provider", "groq"))
-    llm_model: str = Field(default=_YAML_DEFAULTS.get("llm_model", "llama-3.1-8b-instant"))
-    llm_temperature: float = Field(default=_YAML_DEFAULTS.get("llm_temperature", 0.1))
+    llm_model: str = Field(default=_YAML_DEFAULTS.get("llm_model", "openai/gpt-oss-120b"))
+    llm_temperature: float = Field(default=_YAML_DEFAULTS.get("llm_temperature", 0.8))
     llm_max_output_tokens: int = Field(default=_YAML_DEFAULTS.get("llm_max_output_tokens", 2048))
     llm_request_timeout: Optional[int] = Field(default=_YAML_DEFAULTS.get("llm_request_timeout"))
     llm_max_retries: int = Field(default=_YAML_DEFAULTS.get("llm_max_retries", 3))

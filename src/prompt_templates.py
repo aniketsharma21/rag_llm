@@ -1,350 +1,242 @@
 """
-Enhanced prompt templates for the RAG pipeline with better context management.
-Provides specialized prompts for different types of queries and document types.
+Enhanced and optimized prompt templates for the RAG pipeline.
+This version improves clarity, hallucination resistance, and compatibility with large-context models like openai/gpt-oss-120b.
+Maintains identical interfaces and class/method names for backward compatibility.
 """
 
 from typing import List, Dict, Any, Optional
 from langchain.prompts import PromptTemplate
 import structlog
+from transformers import AutoTokenizer
+import re
+import os
 
 logger = structlog.get_logger(__name__)
 
+# Tokenizer for safe truncation (fallback if unavailable)
+try:
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    tokenizer = AutoTokenizer.from_pretrained(
+        "openai/gpt-oss-120b",
+        trust_remote_code=True,
+        local_files_only=False
+    )
+except Exception as e:
+    print(f"Tokenizer loading failed: {e}. Falling back to None.")
+    tokenizer = None
+finally:
+    os.environ.pop("PYTHONIOENCODING", None)
 
 SUPERSCRIPT_MAP = {
-    "0": "\u2070",
-    "1": "\u00B9",
-    "2": "\u00B2",
-    "3": "\u00B3",
-    "4": "\u2074",
-    "5": "\u2075",
-    "6": "\u2076",
-    "7": "\u2077",
-    "8": "\u2078",
-    "9": "\u2079",
+    "0": "⁰",
+    "1": "¹",
+    "2": "²",
+    "3": "³",
+    "4": "⁴",
+    "5": "⁵",
+    "6": "⁶",
+    "7": "⁷",
+    "8": "⁸",
+    "9": "⁹",
 }
 
 
 class EnhancedPromptTemplates:
     """
-    Collection of enhanced prompt templates for different RAG scenarios.
+    Collection of optimized prompt templates for different RAG scenarios.
+    Designed for reasoning-capable LLMs like GPT-OSS-120B.
     """
-    
-    # Base RAG prompt with improved context handling
-    BASE_RAG_TEMPLATE = """You are an AI assistant that answers questions using the supplied source extracts.
-Use the context to answer the question. If the answer is not supported, explicitly state that it is unknown.
 
-When responding:
-1. Begin with a short **Summary** (1–2 sentences) focused solely on the question’s topic.
-2. Follow with grouped bullet lists of key points, keeping each bullet concise and directly relevant to the question.
-3. Explicitly discard any context that does not help answer the question (e.g., biographical details when asked about a concept).
-4. Reference source names inline only when needed for clarity (e.g., [Source: <name>]) and only for facts used in the answer.
-5. Do **not** include a dedicated section titled “Sources” or lists of source names in the answer; the interface already surfaces supporting documents.
+    BASE_RAG_TEMPLATE = (
+        "You are an AI assistant that answers questions using the provided context extracts.\n"
+        "Use only information supported by the context. If the answer is not available, say 'The information is not provided in the context.'\n\n"
+        "Your answer format:\n"
+        "- **Summary**: 1–2 sentences focusing on the question.\n"
+        "- **Key Points**: Bullet list of facts directly from the context.\n"
+        "- Avoid assumptions or unrelated details.\n\n"
+        "Example:\n"
+        "Q: What is data drift?\n"
+        "A:\n"
+        "Summary: Data drift occurs when the statistical properties of input data change over time.\n"
+        "Key Points:\n"
+        "- It causes model performance degradation.\n"
+        "- Can be monitored using KS test or PSI.\n\n"
+        "<CONTEXT_START>\n{context}\n<CONTEXT_END>\n\n"
+        "Question: {question}\n\nAnswer: "
+    )
 
-Context Digest:
-{context}
+    SOURCE_ATTRIBUTION_TEMPLATE = (
+        "You are an AI assistant that answers questions using the provided documents.\n"
+        "Provide a factual and concise answer using only supported information.\n"
 
-Question: {question}
+        "Cite source names inline in brackets (e.g., [Source: Report A]) only when necessary for clarity.\n"
+        "If the answer is not present, reply: 'The information is not provided in the available context.'\n\n"
+        "Answer format:\n"
+        "- **Summary**: Short overview addressing the question.\n"
+        "- **Details**: Bullet list grouped by theme with inline citations.\n\n"
+        "Example:\n"
+        "Q: What are the effects of inflation?\n"
+        "A:\n"
+        "Summary: Inflation reduces the purchasing power of money.\n"
+        "Details:\n"
+        "- Prices of goods and services rise over time [Source: Econ101].\n"
+        "- It can benefit borrowers but harm savers [Source: FinanceText].\n\n"
+        "<CONTEXT_START>\n{context}\n<CONTEXT_END>\n\nQuestion: {question}\n\nAnswer: "
+    )
 
-Answer: """
+    CONVERSATIONAL_TEMPLATE = (
+        "You are an AI assistant in a conversation about documents.\n"
+        "Maintain coherence with the conversation history and accuracy from the context.\n"
+        "If a question cannot be answered from context, say so explicitly.\n\n"
+        "Previous conversation:\n{chat_history}\n\n"
+        "<CONTEXT_START>\n{context}\n<CONTEXT_END>\n\n"
+        "Question: {question}\n\nAnswer: "
+    )
 
-    # Enhanced template with source attribution
-    SOURCE_ATTRIBUTION_TEMPLATE = """You are an AI assistant that provides detailed answers with clear, readable source attribution.
+    SYNTHESIS_TEMPLATE = (
+        "You are an AI assistant synthesizing information from multiple sources ({num_sources}).\n"
+        "Produce a coherent and factual response using reasoning when needed.\n"
+        "If contradictions appear, mention them briefly.\n"
+        "Avoid adding a source list; inline references are enough.\n\n"
+        "Answer format:\n"
+        "- **Summary**: 1–2 sentence overview.\n"
+        "- **Insights**: Thematic bullet lists merging information across sources.\n"
+        "- **Conflicts**: Note disagreements if present.\n\n"
+        "<CONTEXT_START>\n{context}\n<CONTEXT_END>\n\nQuestion: {question}\n\nAnswer: "
+    )
 
-Use the context to answer the question and follow these rules:
-- Start with a concise **Summary** that addresses the question directly.
-- Present key details in short bullet lists grouped by theme; exclude any information that does not advance the answer.
-- When citing evidence, reference the source name inline only when it materially improves clarity and avoid reiterating full source lists.
-- Do **not** append a separate section titled “Sources” or restate file names; the client application will render supporting documents.
+    TECHNICAL_TEMPLATE = (
+        "You are an AI assistant specializing in technical documentation and code analysis.\n"
+        "Respond with accurate, structured technical explanations. Include examples when useful.\n"
+        "If context lacks the answer, say so clearly.\n\n"
+        "<CONTEXT_START>\n{context}\n<CONTEXT_END>\n\nQuestion: {question}\n\n"
+        "Provide a technical response that includes:\n"
+        "- **Direct Answer**\n- **Code Example(s)** (if applicable)\n- **Best Practices**\n- **Considerations / Limitations**\n\nAnswer: "
+    )
 
-Context Digest:
-{context}
-
-Question: {question}
-
-Answer: """
-
-    # Conversational template with history
-    CONVERSATIONAL_TEMPLATE = """You are an AI assistant engaged in a conversation about documents. 
-You have access to relevant context and the conversation history.
-
-Previous conversation:
-{chat_history}
-
-Current context documents:
-{context}
-
-Current question: {question}
-
-Provide a natural, conversational response that:
-1. Acknowledges the conversation history when relevant
-2. Uses the context documents to provide accurate information
-3. Maintains consistency with previous responses
-4. Asks clarifying questions if needed
-
-Answer: """
-
-    # Multi-document synthesis template
-    SYNTHESIS_TEMPLATE = """You are an AI assistant that synthesizes information from multiple sources.
-
-Context from {num_sources} sources is provided. Produce a reader-friendly response that:
-1. Opens with a **Summary** paragraph (1–2 sentences) tightly focused on the question’s subject.
-2. Organises insights into themed sections with bullet lists, including only statements that materially answer the question.
-   - Group shared findings together and mention supporting source names in brackets when essential.
-   - Call out unique insights or disagreements briefly.
-3. Avoid adding any section titled “Sources” or restating document lists; the application surfaces supporting documents automatically.
-
-Context Overview:
-{context}
-
-Question: {question}
-
-Answer: """
-
-    # Technical documentation template
-    TECHNICAL_TEMPLATE = """You are an AI assistant specialized in technical documentation and code analysis.
-
-Based on the provided technical context, answer the question with:
-1. Technical accuracy and precision
-2. Code examples when relevant
-3. Best practices and recommendations
-4. Potential pitfalls or considerations
-
-Technical Context:
-{context}
-
-Question: {question}
-
-Provide a technical response that includes:
-- **Direct Answer**: [Clear, technical response]
-- **Code Examples**: [If applicable, provide code snippets]
-- **Best Practices**: [Relevant recommendations]
-- **Considerations**: [Important notes, limitations, or warnings]
-
-Answer: """
-
-    # Summary and analysis template
-    ANALYSIS_TEMPLATE = """You are an AI assistant that provides analytical insights from document content.
-
-Analyze the provided context to answer the question. Focus on:
-1. Key insights and patterns
-2. Implications and consequences  
-3. Relationships between concepts
-4. Critical analysis and evaluation
-
-Context for analysis:
-{context}
-
-Question: {question}
-
-Provide an analytical response with:
-- **Key Findings**: [Main insights from the context]
-- **Analysis**: [Your interpretation and evaluation]
-- **Implications**: [What this means or suggests]
-- **Recommendations**: [If applicable, suggested actions or considerations]
-
-Answer: """
+    ANALYSIS_TEMPLATE = (
+        "You are an analytical assistant deriving insights from documents.\n"
+        "Focus on relationships, implications, and evaluation of key ideas.\n"
+        "Provide reasoning before your final answer.\n\n"
+        "<CONTEXT_START>\n{context}\n<CONTEXT_END>\n\nQuestion: {question}\n\n"
+        "Reasoning:\n- Step 1: Identify key points\n- Step 2: Evaluate implications\n\nFinal Answer:\n"
+        "- **Key Findings**\n- **Analysis**\n- **Implications**\n- **Recommendations**\n\nAnswer: "
+    )
 
 
 class PromptManager:
-    """
-    Manages prompt selection and customization based on query type and context.
-    """
-    
     def __init__(self):
         self.templates = EnhancedPromptTemplates()
         self.template_cache = {}
-        
-    def get_prompt_template(
-        self, 
-        template_type: str = "base",
-        custom_variables: Optional[Dict[str, Any]] = None
-    ) -> PromptTemplate:
-        """
-        Get a prompt template based on the specified type.
-        
-        Args:
-            template_type: Type of template to use
-            custom_variables: Additional variables for template customization
-            
-        Returns:
-            PromptTemplate instance
-        """
-        # Use frozenset(custom_variables.items()) to ensure consistent hashing
-        cache_key = f"{template_type}_{hash(frozenset(custom_variables.items()) if custom_variables else frozenset())}"
 
+    def get_prompt_template(
+        self, template_type: str = "base", custom_variables: Optional[Dict[str, Any]] = None
+    ) -> PromptTemplate:
+        cache_key = f"{template_type}_{hash(frozenset(custom_variables.items()) if custom_variables else frozenset())}"
         if cache_key in self.template_cache:
             return self.template_cache[cache_key]
-        
+
         template_map = {
             "base": self.templates.BASE_RAG_TEMPLATE,
             "source_attribution": self.templates.SOURCE_ATTRIBUTION_TEMPLATE,
             "conversational": self.templates.CONVERSATIONAL_TEMPLATE,
             "synthesis": self.templates.SYNTHESIS_TEMPLATE,
             "technical": self.templates.TECHNICAL_TEMPLATE,
-            "analysis": self.templates.ANALYSIS_TEMPLATE
+            "analysis": self.templates.ANALYSIS_TEMPLATE,
         }
-        
+
         if template_type not in template_map:
-            logger.warning(f"Unknown template type: {template_type}, using base template")
+            logger.warning(f"Unknown template type: {template_type}, defaulting to base.")
             template_type = "base"
-        
+
         template_string = template_map[template_type]
-        
-        # Extract input variables from template
         input_variables = self._extract_variables(template_string)
-        
-        # Add custom variables if provided
+
         if custom_variables:
             input_variables.extend(custom_variables.keys())
-            input_variables = list(set(input_variables))  # Remove duplicates
-        
-        prompt_template = PromptTemplate(
-            template=template_string,
-            input_variables=input_variables
-        )
-        
+            input_variables = list(set(input_variables))
+
+        prompt_template = PromptTemplate(template=template_string, input_variables=input_variables)
         self.template_cache[cache_key] = prompt_template
-        logger.info(f"Created prompt template", template_type=template_type, variables=input_variables)
-        
         return prompt_template
-    
-    def _extract_variables(self, template_string: str) -> List[str]:
-        """Extract variable names from template string."""
-        import re
-        variables = re.findall(r'\{(\w+)\}', template_string)
+
+    @staticmethod
+    def _extract_variables(template_string: str) -> List[str]:
+        variables = re.findall(r"{(\w+)}", template_string)
         return list(set(variables))
-    
-    def select_template_by_query_type(self, question: str, context_length: int = 0) -> str:
-        """
-        Automatically select the best template based on query characteristics.
-        
-        Args:
-            question: The user's question
-            context_length: Number of context documents
-            
-        Returns:
-            Template type string
-        """
-        question_lower = question.lower()
-        
-        # Technical queries
-        if any(keyword in question_lower for keyword in [
-            'code', 'function', 'class', 'method', 'api', 'implementation',
-            'algorithm', 'syntax', 'debug', 'error', 'exception'
-        ]):
+
+    @staticmethod
+    def select_template_by_query_type(question: str, context_length: int = 0) -> str:
+        q = question.lower()
+        if any(k in q for k in ["code", "function", "api", "error", "algorithm", "class", "debug"]):
             return "technical"
-        
-        # Analysis queries
-        elif any(keyword in question_lower for keyword in [
-            'analyze', 'compare', 'evaluate', 'assess', 'implications',
-            'impact', 'consequences', 'trends', 'patterns'
-        ]):
+        elif any(k in q for k in ["analyze", "compare", "impact", "trend", "evaluate", "assess"]):
             return "analysis"
-        
-        # Multi-source synthesis
         elif context_length > 3:
             return "synthesis"
-        
-        # Source attribution for factual queries
-        elif any(keyword in question_lower for keyword in [
-            'who', 'what', 'when', 'where', 'how many', 'statistics',
-            'data', 'facts', 'evidence', 'source'
-        ]):
+        elif any(k in q for k in ["who", "what", "when", "where", "statistics", "facts", "source"]):
             return "source_attribution"
-        
-        # Default to base template
         else:
             return "base"
-    
+
+    @staticmethod
     def create_context_string(
-        self, 
-        documents: List[Any], 
-        include_metadata: bool = True,
-        max_length: int = 4000
+        documents: List[Any], include_metadata: bool = True, max_length: int = 4000
     ) -> str:
-        """
-        Create a formatted context string from documents.
-        
-        Args:
-            documents: List of document objects
-            include_metadata: Whether to include document metadata
-            max_length: Maximum length of context string
-            
-        Returns:
-            Formatted context string
-        """
-        context_parts = []
-        current_length = 0
-        
+        context_parts, current_length = [], 0
+
         for i, doc in enumerate(documents):
-            # Format document content
-            doc_number = i + 1
-            metadata = dict(getattr(doc, 'metadata', {}) or {})
-            display_name = metadata.get('source_display_name') or metadata.get('source') or f"Document {doc_number}"
+            metadata = dict(getattr(doc, "metadata", {}) or {})
+            display_name = metadata.get("source_display_name") or metadata.get("source") or f"Document {i+1}"
 
-            content_lines = [f"### Source: {display_name}"]
-
+            lines = [f"### Source: {display_name}"]
             if include_metadata:
-                page_label = metadata.get('page_label')
-                if not page_label and isinstance(metadata.get('page_number'), int):
-                    page_label = f"Page {metadata['page_number']}"
-                if page_label:
-                    content_lines.append(f"Location: {page_label}")
+                page = metadata.get("page_label") or (
+                    f"Page {metadata['page_number']}" if isinstance(metadata.get("page_number"), int) else None
+                )
+                if page:
+                    lines.append(f"Location: {page}")
+                if metadata.get("section"):
+                    lines.append(f"Section: {metadata['section']}")
+            if metadata.get("snippet"):
+                lines.append(f"Summary: {metadata['snippet']}")
+            lines.append("Content:")
+            lines.append(doc.page_content)
 
-                if metadata.get('section'):
-                    content_lines.append(f"Section: {metadata['section']}")
+            doc_content = "\n".join(lines) + "\n\n"
 
-            snippet = metadata.get('snippet')
-            if snippet:
-                content_lines.append(f"Summary: {snippet}")
+            if tokenizer:
+                token_count = len(tokenizer.encode(doc_content))
+                if current_length + token_count > max_length:
+                    remaining = max_length - current_length
+                    truncated = tokenizer.decode(tokenizer.encode(doc_content)[:remaining]) + "...\n"
+                    context_parts.append(truncated)
+                    break
+                current_length += token_count
+            else:
+                if current_length + len(doc_content) > max_length:
+                    context_parts.append(doc_content[: max_length - current_length - 50] + "...\n")
+                    break
+                current_length += len(doc_content)
 
-            content_lines.append("Content:")
-            content_lines.append(doc.page_content)
-            content_lines.append("")
-
-            doc_content = "\n".join(content_lines) + "\n"
-            
-            # Check length limit
-            if current_length + len(doc_content) > max_length:
-                # Truncate if necessary
-                remaining_space = max_length - current_length
-                if remaining_space > 100:  # Only add if there's meaningful space
-                    truncated_content = doc_content[:remaining_space-50] + "...\n\n"
-                    context_parts.append(truncated_content)
-                break
-            
             context_parts.append(doc_content)
-            current_length += len(doc_content)
-        
+
         return "".join(context_parts)
-    
-    def format_chat_history(self, chat_history: List[Dict[str, str]], max_exchanges: int = 5) -> str:
-        """
-        Format chat history for conversational prompts.
-        
-        Args:
-            chat_history: List of chat exchanges
-            max_exchanges: Maximum number of exchanges to include
-            
-        Returns:
-            Formatted chat history string
-        """
+
+    @staticmethod
+    def format_chat_history(chat_history: List[Dict[str, str]], max_exchanges: int = 5) -> str:
         if not chat_history:
             return "No previous conversation."
-        
-        # Take the most recent exchanges
-        recent_history = chat_history[-max_exchanges:]
-        
-        formatted_history = []
-        for exchange in recent_history:
-            if 'user' in exchange and 'assistant' in exchange:
-                formatted_history.append(f"User: {exchange['user']}")
-                formatted_history.append(f"Assistant: {exchange['assistant']}")
-        
-        return "\n".join(formatted_history)
+
+        history = chat_history[-max_exchanges:]
+        formatted = []
+        for exch in history:
+            if "user" in exch and "assistant" in exch:
+                formatted.append(f"User: {exch['user']}")
+                formatted.append(f"Assistant: {exch['assistant']}")
+        return "\n".join(formatted)
 
 
-# Global prompt manager instance
 prompt_manager = PromptManager()
 
 
@@ -353,56 +245,32 @@ def get_enhanced_prompt(
     documents: List[Any],
     template_type: Optional[str] = None,
     chat_history: Optional[List[Dict[str, str]]] = None,
-    **kwargs
+    **kwargs,
 ) -> str:
-    """
-    Convenience function to get a formatted prompt with context.
-    
-    Args:
-        question: User's question
-        documents: Retrieved documents
-        template_type: Specific template type (auto-selected if None)
-        chat_history: Previous conversation history
-        **kwargs: Additional template variables
-        
-    Returns:
-        Formatted prompt string
-    """
-    # Auto-select template if not specified
     if template_type is None:
-        template_type = prompt_manager.select_template_by_query_type(
-            question, len(documents)
-        )
-    
-    # Get the appropriate template
+        template_type = prompt_manager.select_template_by_query_type(question, len(documents))
+
     template = prompt_manager.get_prompt_template(template_type)
-    
-    # Prepare template variables
-    template_vars = {
-        "question": question,
-        "context": prompt_manager.create_context_string(documents),
-        **kwargs
-    }
-    
-    # Add chat history if template supports it
+    context = prompt_manager.create_context_string(documents)
+
+    template_vars = {"question": question, "context": context, **kwargs}
+
     if "chat_history" in template.input_variables:
         template_vars["chat_history"] = prompt_manager.format_chat_history(chat_history or [])
-    
-    # Add number of sources for synthesis template
+
     if "num_sources" in template.input_variables:
-        template_vars["num_sources"] = len(documents)
-    
+        template_vars["num_sources"] = str(len(documents))
+
     try:
         formatted_prompt = template.format(**template_vars)
         logger.info(
-            "Generated enhanced prompt",
+            "Generated optimized prompt",
             template_type=template_type,
             question_length=len(question),
-            context_docs=len(documents)
+            context_docs=len(documents),
         )
         return formatted_prompt
-    except Exception as e:
-        logger.error("Failed to format prompt", error=str(e), template_type=template_type)
-        # Fallback to base template
-        base_template = prompt_manager.get_prompt_template("base")
-        return base_template.format(question=question, context=template_vars["context"])
+    except (KeyError, Exception) as e:
+        logger.error("Prompt formatting failed", error=str(e), template_type=template_type)
+        fallback = prompt_manager.get_prompt_template("base")
+        return fallback.format(question=question, context=context)
