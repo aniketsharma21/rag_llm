@@ -6,10 +6,11 @@ import IconButton from './ui/IconButton';
 import Card, { CardContent } from './ui/Card';
 import Badge from './ui/Badge';
 import Modal from './ui/Modal';
+import { motion } from 'framer-motion';
 import Toast from './ui/Toast';
 import RefreshOutlinedIcon from '@mui/icons-material/RefreshOutlined';
 
-function EnhancedFileUpload() {
+function EnhancedFileUpload({ onUploadComplete }) {
   // Component State
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -87,7 +88,7 @@ function EnhancedFileUpload() {
       console.error("Failed to fetch upload history:", e);
       showToast('Unable to fetch uploaded files. Please try again later.', 'error');
     }
-  }, [apiBaseUrl, normalizeFileRecord]);
+  }, [apiBaseUrl, normalizeFileRecord, showToast]);
 
   useEffect(() => {
     fetchHistory();
@@ -100,7 +101,7 @@ function EnhancedFileUpload() {
     const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
     
     if (!ALLOWED_TYPES.includes(file.type) && !ALLOWED_EXTENSIONS.includes(fileExtension)) {
-      showToast('Only PDF, DOCX, and TXT files are allowed.', 'error');
+      showToast(`Only ${humanReadableTypes.join(', ')} files are allowed.`, 'error');
       return false;
     }
     
@@ -110,7 +111,7 @@ function EnhancedFileUpload() {
     }
     
     return true;
-  }, [MAX_SIZE_MB, ALLOWED_TYPES, ALLOWED_EXTENSIONS, showToast]);
+  }, [MAX_SIZE_MB, ALLOWED_TYPES, ALLOWED_EXTENSIONS, showToast, humanReadableTypes]);
 
   /**
    * Handle file selection
@@ -158,38 +159,44 @@ function EnhancedFileUpload() {
     }
   }, [handleFileSelect]);
 
-  /**
-   * Handle file upload
-   */
-  const handleUpload = async () => {
-    if (!selectedFile) return;
+/**
+ * Handle file upload
+ */
+const handleUpload = async () => {
+  if (!selectedFile) return;
 
-    const formData = new FormData();
-    formData.append('file', selectedFile);
+  const formData = new FormData();
+  formData.append('file', selectedFile);
 
-    setUploading(true);
-    setUploadProgress(0);
+  setUploading(true);
+  setUploadProgress(0);
 
-    try {
-      const response = await axios.post(`${apiBaseUrl}/ingest`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        onUploadProgress: (progressEvent) => {
-          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          setUploadProgress(percentCompleted);
-        },
-      });
-      
-      showToast(response.data.message || 'File uploaded successfully!', 'success');
-      setSelectedFile(null);
-      fetchHistory(); // Refresh the history
-    } catch (error) {
-      const errorMessage = error?.response?.data?.message || 'File upload failed!';
-      showToast(errorMessage, 'error');
-    } finally {
-      setUploading(false);
-      setUploadProgress(0);
+  try {
+    const response = await axios.post(`${apiBaseUrl}/ingest`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (progressEvent) => {
+        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        setUploadProgress(percentCompleted);
+      },
+    });
+
+    showToast(response.data.message || 'File uploaded successfully!', 'success');
+    setSelectedFile(null);
+    fetchHistory(); // Refresh the history
+
+    // Notify parent component that upload is complete
+    if (onUploadComplete) {
+      onUploadComplete();
     }
-  };
+  } catch (error) {
+    const errorMessage = error?.response?.data?.message || 'File upload failed!';
+    showToast(errorMessage, 'error');
+  } finally {
+    setUploading(false);
+    setUploadProgress(0);
+  }
+};
+
 
   /**
    * Remove selected file
@@ -211,20 +218,22 @@ function EnhancedFileUpload() {
   };
 
   return (
-    <div className="p-4 md:p-6 h-full overflow-y-auto">
+    <div className="p-6 max-w-6xl mx-auto">
       {toast.show && (
         <Toast message={toast.message} type={toast.type} onClose={dismissToast} />
       )}
 
       <div className="max-w-4xl mx-auto space-y-8">
-        <div>
-          <h2 className="text-3xl font-bold mb-2 text-gray-900 dark:text-white">Upload Documents</h2>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Drag and drop {humanReadableTypes.join(', ')} files up to {MAX_SIZE_MB}MB or browse your computer.
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+            Document Upload
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400">
+            Upload {humanReadableTypes.join(', ')} files up to {MAX_SIZE_MB}MB. Files will be processed for intelligent search and retrieval.
           </p>
         </div>
 
-        <Card className="p-8">
+        <Card className="p-8 hover-lift">
           <div
             className={`
               relative border-2 border-dashed rounded-xl p-8 transition-all duration-300 cursor-pointer
@@ -322,70 +331,78 @@ function EnhancedFileUpload() {
           </div>
         </Card>
 
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Uploaded Files</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">Recently uploaded documents appear here.</p>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <Card className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Uploaded Files</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Recently uploaded documents appear here.</p>
+              </div>
+              <IconButton onClick={fetchHistory} tooltip="Refresh list">
+                <RefreshOutlinedIcon fontSize="small" />
+              </IconButton>
             </div>
-            <IconButton onClick={fetchHistory} tooltip="Refresh list">
-              <RefreshOutlinedIcon fontSize="small" />
-            </IconButton>
-          </div>
 
-          {uploadHistory.length > 0 ? (
-            <div className="space-y-3">
-              {uploadHistory.map((file, idx) => (
-                <Card key={idx} className="p-4 bg-gray-50 dark:bg-gray-800/60">
-                  <CardContent className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-0">
-                    <div className="flex items-start gap-3">
-                      <div className="flex-shrink-0">
-                        <svg className="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{file.name}</p>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-300">
-                          {file.uploadDate && (
-                            <Badge variant="neutral">{new Date(file.uploadDate).toLocaleString()}</Badge>
-                          )}
-                          {file.size && (
-                            <Badge variant="blue">{formatFileSize(file.size)}</Badge>
-                          )}
+            {uploadHistory.length > 0 ? (
+              <div className="space-y-3">
+                {uploadHistory.map((file, idx) => (
+                  <motion.div key={file.name || idx} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.05 }}>
+                    <Card className="p-4 bg-gray-50 dark:bg-gray-800/60">
+                      <CardContent className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-0">
+                        <div className="flex items-start gap-3">
+                          <div className="flex-shrink-0">
+                            <svg className="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900 dark:text-white">{file.name}</p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-300">
+                              {file.uploadDate && (
+                                <Badge variant="neutral">{new Date(file.uploadDate).toLocaleString()}</Badge>
+                              )}
+                              {file.size && (
+                                <Badge variant="blue">{formatFileSize(file.size)}</Badge>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
 
-                    <div className="flex items-center gap-2">
-                      {file.previewUrl ? (
-                        <Button variant="subtle" size="sm" onClick={() => setPreviewFile(file)}>
-                          Preview
-                        </Button>
-                      ) : null}
-                      {file.previewUrl ? (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          as="a"
-                          href={file.previewUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          Open
-                        </Button>
-                      ) : null}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              <p>No files uploaded yet. Upload a document to see it here.</p>
-            </div>
-          )}
-        </Card>
+                        <div className="flex items-center gap-2">
+                          {file.previewUrl ? (
+                            <Button variant="subtle" size="sm" onClick={() => setPreviewFile(file)}>
+                              Preview
+                            </Button>
+                          ) : null}
+                          {file.previewUrl ? (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              as="a"
+                              href={file.previewUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              Open
+                            </Button>
+                          ) : null}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                <p>No files uploaded yet. Upload a document to see it here.</p>
+              </div>
+            )}
+          </Card>
+        </motion.div>
       </div>
 
       <Modal

@@ -601,14 +601,17 @@ async def websocket_endpoint(websocket: WebSocket):
         except (asyncio.CancelledError, WebSocketDisconnect):
             pass  # Task was cancelled, which is expected on disconnect
         except Exception as e:
-            logger.warning(f"Error in ping task: {e}")
+            logger.warning(f"Error in ping task: {e}, closing connection")
+            # The main loop will catch the WebSocketDisconnect and clean up.
+            with contextlib.suppress(Exception):
+                await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
 
     ping_task = asyncio.create_task(send_periodic_ping())
 
     try:
         while True:
             try:
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=300.0)
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
             except asyncio.TimeoutError:
                 logger.warning("WebSocket timeout", client=str(getattr(websocket, "client", "unknown")))
                 await manager.send_personal_message(

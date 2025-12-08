@@ -1,5 +1,5 @@
 const DEFAULTS = {
-  apiBaseUrl: 'http://localhost:8000',
+  apiBaseUrl: 'http://127.0.0.1:8000',
   websocketPath: '/ws/chat',
   websocketUrl: 'ws://localhost:8000/ws/chat',
   jobStatusPollInterval: 2000,
@@ -31,7 +31,12 @@ export const createClientConfig = () => {
     ? rawWebsocketUrl.trim()
     : (() => {
         try {
-          const apiUrl = new URL(apiBaseUrl);
+          const isRelative = apiBaseUrl.startsWith('/');
+          const baseUrl = isRelative 
+            ? `${window.location.origin}${apiBaseUrl}`
+            : apiBaseUrl;
+            
+          const apiUrl = new URL(baseUrl);
           const wsProtocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
           return `${wsProtocol}//${apiUrl.host}${DEFAULTS.websocketPath}`;
         } catch (error) {

@@ -2,16 +2,16 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 
 module.exports = function(app) {
   app.use(
-    '/ws',
+    '/ws/chat',
     createProxyMiddleware({
-      target: 'http://localhost:8000',
+      target: 'http://127.0.0.1:8000',
       ws: true,
     })
   );
   app.use(
-    '/',
+    ['/health', '/ingest', '/status', '/files', '/query', '/conversations'],
     createProxyMiddleware({
-      target: 'http://localhost:8000',
+      target: 'http://127.0.0.1:8000',
     })
   );
 };
