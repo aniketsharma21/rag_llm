@@ -10,7 +10,6 @@ import {
 
 const FileList = ({ files }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFile, setSelectedFile] = useState(null);
 
   const filteredFiles = files.filter(file =>
     file.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -24,14 +23,13 @@ const FileList = ({ files }) => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const getFileIcon = (fileName) => {
-    const extension = fileName.split('.').pop()?.toLowerCase();
+  const getFileIcon = () => {
     return <DocumentTextIcon className="w-8 h-8 text-gray-400" />;
   };
 
   const handlePreview = (file) => {
     if (file.previewUrl) {
-      window.open(file.previewUrl, '_blank');
+      window.open(file.previewUrl, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -72,11 +70,11 @@ const FileList = ({ files }) => {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.1 }}
               className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 hover:shadow-lg transition-shadow cursor-pointer hover-lift"
-              onClick={() => setSelectedFile(file)}
+              onClick={() => handlePreview(file)}
             >
               <div className="flex items-start space-x-3">
                 <div className="flex-shrink-0">
-                  {getFileIcon(file.name)}
+                  {getFileIcon()}
                 </div>
 
                 <div className="flex-1 min-w-0">

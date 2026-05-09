@@ -1,5 +1,5 @@
 const DEFAULTS = {
-  apiBaseUrl: 'http://127.0.0.1:8000',
+  apiBaseUrl: '',
   websocketPath: '/ws/chat',
   websocketUrl: 'ws://localhost:8000/ws/chat',
   jobStatusPollInterval: 2000,
@@ -20,6 +20,7 @@ const parseIntegerEnv = (value, fallback) => {
 
 export const createClientConfig = () => {
   const rawApiBase = process.env.REACT_APP_API_URL
+    ?? process.env.REACT_APP_API_BASE_URL
     ?? process.env.REACT_APP_API_BASE
     ?? DEFAULTS.apiBaseUrl;
 

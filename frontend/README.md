@@ -9,7 +9,7 @@ A modern, responsive web interface for the RAG (Retrieval-Augmented Generation) 
 - **Rich Message Experience**: Markdown rendering, inline code blocks, copy/share actions, relative timestamps, and document-level source cards.
 - **Document Workbench**: Drag & drop uploads with validation, progress feedback, toast alerts, and inline PDF preview modals powered by `/files/preview/{filename}`.
 - **Conversation Intelligence**: Searchable history in the sidebar, quick filters, and persistent sessions.
-- **Configurable Controls**: Settings panel for model selection and chat preferences, plus theme toggles with local persistence.
+- **Configurable Controls**: Theme toggles with local persistence.
 
 ## 🚀 Recent Enhancements
 
@@ -61,11 +61,25 @@ frontend/
 │   ├── components/
 │   │   ├── EnhancedSidebar.js      # Navigation, search, conversation history
 │   │   ├── EnhancedHeader.js       # Connection status + actions
-│   │   ├── ChatWindow.js           # Displays chat transcripts
 │   │   ├── EnhancedMessage.js      # Message bubble with source cards & actions
 │   │   ├── EnhancedChatInput.js    # Input box, upload status, stop button
 │   │   ├── EnhancedFileUpload.js   # Drag & drop upload and preview modal
-│   │   └── SettingsPanel.js        # Model and preference configuration
+│   │   ├── FileList.js             # Uploaded file listing
+│   │   ├── TypingIndicator.js      # Typing animation component
+│   │   ├── UploadProgress.js       # Upload progress indicator
+│   │   ├── WelcomeScreen.js        # Initial welcome view
+│   │   └── ui/                     # Reusable UI primitives (Badge, Button, Card, etc.)
+│   ├── config/
+│   │   └── clientConfig.js  # Client-side configuration constants
+│   ├── context/
+│   │   ├── ConfigContext.js           # API/WS configuration provider
+│   │   ├── ConversationStoreContext.js # Conversation state management
+│   │   ├── ThemeContext.js            # Light/dark theme provider
+│   │   └── WebSocketContext.js        # WebSocket connection provider
+│   ├── routes/
+│   │   ├── AppLayout.js     # Main layout wrapper
+│   │   ├── ChatRoute.js     # Chat page route
+│   │   └── UploadRoute.js   # Upload page route
 │   ├── App.css            # Main stylesheet with Tailwind directives
 │   └── index.js           # Application entry point
 ├── tailwind.config.js     # Tailwind CSS configuration

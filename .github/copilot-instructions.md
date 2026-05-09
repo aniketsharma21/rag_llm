@@ -6,32 +6,40 @@ Read these files first (high signal):
 - `src/config.py` — central config, paths and where environment/YAML overrides are loaded.
 - `src/ingest.py` — document loaders, checksum logic and chunking (uses `RecursiveCharacterTextSplitter`).
 - `src/embed_store.py` — embedding model init (HF), Chroma persistence, and `get_retriever()`.
-- `src/llm.py` — LLM initialization (Groq) and failure modes (missing API key).
+- `src/llm.py` — LLM initialization (Groq), `EnhancedRAGChain`, and failure modes (missing API key).
 - `src/api.py` — REST + WebSocket entrypoints and streaming behavior.
-- `src/main.py` — CLI commands (`index`, `query`) showing end-to-end chains and prompt usage.
+- `src/cli.py` — async CLI with `ingest`, `query`, `status`, and `warmup` subcommands.
+- `src/services/rag_service.py` — `RAGService` and `RAGApplicationService` that orchestrate query and ingestion flows.
+- `src/services/ingestion_service.py` — document ingestion orchestration called by both API and CLI.
 
 Big-picture points to keep in mind
+- **Architecture**: API endpoints (`src/api.py`) delegate to a service layer (`src/services/`) which coordinates business logic. The CLI (`src/cli.py`) uses the same service layer. `src/main.py` is a thin delegate to `src/cli.py`.
 - Ingestion uses checksum-based caching: `process_document()` writes chunks to `data/processed/*_chunks.pkl` and checksum files under `data/processed/checksums/`. If checksum matches, cached chunks are used.
 - Embeddings use a local Hugging Face sentence-transformer (`sentence-transformers/all-MiniLM-L6-v2`) and will prefer CUDA if `torch.cuda.is_available()`.
 - Vector store persistence directory: `CHROMA_PERSIST_DIR` → `./chroma_store` (configured in `src/config.py`). Code expects a persisted Chroma DB for queries.
 - LLMs are provided by Groq and require `GROQ_API_KEY`; tests and runtime raise/skip when the key is missing.
-- Prompt templates live in `src/prompts/` (e.g. `rag_prompts.yaml`) and are loaded by the CLI and API chains.
+- Prompt templates live in `src/prompts/` (e.g. `rag_prompts.yaml`) and are managed by `src/prompt_templates.py`.
+- Observability: `src/middleware/observability.py` adds Prometheus metrics (request counts, duration histograms) and a `/metrics` endpoint.
 
 Developer workflows & exact commands
-- Create env and install (README also describes these): create a venv, activate it, then `pip install -r requirements.txt`.
+- Create env and install (README also describes these): `conda env create -f environment.yml && conda activate dl_gpu_min`, or create a venv and `pip install -r requirements.txt`.
 - Start backend (development):
 ```powershell
-# Activate venv on Windows PowerShell
-.\venv\Scripts\Activate.ps1
+# Activate conda env on Windows PowerShell
+conda activate dl_gpu_min
 uvicorn src.api:app --reload
 ```
-- Index a document via CLI (uses paths relative to `data/raw` if not absolute):
+- Ingest a document via CLI (uses paths relative to `data/raw` if not absolute):
 ```powershell
-python -m src.main index --file advanced-rag-interview-prep.pdf
+python -m src.main ingest --file advanced-rag-interview-prep.pdf
 ```
 - Query via CLI:
 ```powershell
 python -m src.main query "What are the interview prep takeaways?"
+```
+- Check job status:
+```powershell
+python -m src.main status <job_id>
 ```
 - Start frontend (separate terminal):
 ```powershell
@@ -46,15 +54,19 @@ pytest tests/
 
 Project-specific conventions & patterns
 - Checksums: ingestion will not reprocess files with an identical SHA-256 stored in `data/processed/checksums/` — if the checksum exists but chunk file is missing the code reprocesses.
-- Vector store lifecycle: `build_vector_store(chunks)` creates/persists a Chroma DB; `load_vector_store()` expects the same persist directory and recreates the retriever with `as_retriever(search_kwargs={"k": TOP_K})`.
-- Prompt chaining: both `src/main.py` and `src/api.py` build small runnable chains where a retriever provides context and a PromptTemplate/ChatPromptTemplate is combined with the LLM. Look at `rag_chain` constructions to mirror behavior.
-- WebSocket: `src/api.py` implements a streaming generator pattern (async for chunks in `rag_chain.astream`) and sends JSON messages of types `chunk`, `complete`, `status`, `error` — follow this format when adding real-time features.
+- Vector store lifecycle: `build_vector_store(chunks)` creates/persists a Chroma DB; `load_vector_store()` expects the same persist directory.
+- Service layer: `RAGApplicationService` composes `IngestionService` and `RAGService` and is the primary interface for both the API and CLI. The API uses service methods directly; the CLI calls the same methods through `_build_app_service()`.
+- WebSocket: `src/api.py` implements task-based query processing, sends JSON messages of types `status`, `complete`, `error`, `ping`/`pong` — follow this format when adding real-time features.
+- Database: `src/db/` contains async SQLAlchemy models (`models.py`), session management (`session.py`), and repository-pattern CRUD classes in `repositories/`.
 
 Integration and external dependencies to watch
 - Groq LLM via `langchain_groq` — requires `GROQ_API_KEY` in `.env` or `config.yaml`.
 - ChromaDB for vector persistence — stored under `chroma_store/` in the repo root.
 - Local HF sentence-transformer cached under `models_cache/` — embedding initialization uses `cache_folder=MODELS_CACHE_DIR`.
 - Frontend proxies API requests to `http://localhost:8000` (see `frontend/package.json` `proxy` field).
+
+CI/CD
+- GitHub Actions workflow `docs.yml` deploys Sphinx documentation to GitHub Pages on pushes to `master`.
 
 When editing code, run these quick sanity checks
 1. Lint / type: run `mypy` (project has mypy in dev deps) and `black` for formatting.
@@ -67,10 +79,5 @@ If you change ingestion or embeddings be aware:
 
 Where to look for more context
 - `README.md` — user-level quickstart and setup.
-- `tests/` — examples of expected behavior (see `test_ingest.py`, `test_llm.py`).
-
-Questions for the repo owner (leave these as comments if unclear):
-- Are there any CI steps or GitHub Actions that should run on PRs? (none found in the repo.)
-- Preferred Windows dev workflow (PowerShell) vs. Unix shell for setup scripts (setup.sh is bash).
-
-If anything here looks incomplete or you want more agent-level rules (style, testing thresholds, or PR checklist), tell me what to include and I will iterate.
+- `tests/` — examples of expected behavior (see `test_ingest.py`, `test_llm_enhanced.py`).
+- `docs/` — Sphinx-based technical documentation.

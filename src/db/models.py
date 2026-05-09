@@ -11,9 +11,9 @@ timestamps for creation and updates.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -24,6 +24,12 @@ class Base(DeclarativeBase):
     Automatically handles table naming and inheritance.
     """
     pass
+
+
+def utc_now() -> datetime:
+    """Return the current UTC timestamp for database defaults."""
+
+    return datetime.now(timezone.utc)
 
 
 class Conversation(Base):
@@ -44,8 +50,8 @@ class Conversation(Base):
     user_id: Mapped[str] = mapped_column(String(50), index=True, default="default_user")
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     messages: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
@@ -75,8 +81,8 @@ class Document(Base):
     file_type: Mapped[str] = mapped_column(String(50), nullable=False)
     checksum: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     chunks_count: Mapped[int] = mapped_column(Integer, default=0)
-    uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_processed: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
@@ -101,5 +107,5 @@ class IngestJob(Base):
     message: Mapped[str | None] = mapped_column(String(255))
     details: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)

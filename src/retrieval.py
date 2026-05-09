@@ -3,7 +3,6 @@ Advanced retrieval system with hybrid semantic + keyword search.
 Implements ensemble retrieval combining vector similarity and BM25 keyword matching.
 """
 
-import logging
 from typing import List, Dict, Any, Optional
 
 from langchain.retrievers import EnsembleRetriever
@@ -65,6 +64,7 @@ class HybridRetriever:
         vector_store,
         documents: List[Document],
         config: Optional[Dict[str, Any]] = None,
+        k: Optional[int] = None,
     ):
         """
         Initialize the hybrid retriever.
@@ -73,11 +73,15 @@ class HybridRetriever:
             vector_store: ChromaDB vector store instance
             documents: List of processed documents
             config: Configuration dictionary for retriever settings
+            k: Backward-compatible shortcut for config["k"]
         """
         self.config = {**DEFAULT_CONFIG, **(config or {})}
+        if k is not None:
+            self.config["k"] = k
         self.vector_store = vector_store
         self.documents = documents
         self.k = self.config["k"]
+        self._uses_ensemble = False
 
         logger.info(
             "Initializing hybrid retriever",
@@ -90,11 +94,16 @@ class HybridRetriever:
         bm25_retriever = self._init_bm25_retriever()
 
         if bm25_retriever:
-            self.retriever = EnsembleRetriever(
-                retrievers=[self.vector_retriever, bm25_retriever],
-                weights=[self.config["semantic_weight"], self.config["keyword_weight"]]
-            )
-            logger.info("Ensemble retriever initialized successfully")
+            try:
+                self.retriever = EnsembleRetriever(
+                    retrievers=[self.vector_retriever, bm25_retriever],
+                    weights=[self.config["semantic_weight"], self.config["keyword_weight"]]
+                )
+                self._uses_ensemble = True
+                logger.info("Ensemble retriever initialized successfully")
+            except Exception as e:
+                logger.error("Failed to initialize ensemble retriever. Falling back to vector-only search.", error=str(e))
+                self.retriever = self.vector_retriever
         else:
             logger.warning("Could not initialize any BM25 retriever. Falling back to vector-only search.")
             self.retriever = self.vector_retriever
@@ -128,7 +137,7 @@ class HybridRetriever:
         logger.info("Starting hybrid retrieval", query=query, k=k_to_use)
 
         try:
-            results = self.retriever.get_relevant_documents(query)
+            results = self.retriever.invoke(query)
             results = results[:k_to_use]
             self._add_retrieval_metadata(results)
             logger.info("Hybrid retrieval completed", final_count=len(results))
@@ -139,35 +148,38 @@ class HybridRetriever:
 
     def _add_retrieval_metadata(self, documents: List[Document]):
         """Adds retrieval metadata to the documents."""
-        method = "hybrid" if isinstance(self.retriever, EnsembleRetriever) else "vector_only"
         for i, doc in enumerate(documents):
             if not hasattr(doc, 'metadata'):
                 doc.metadata = {}
             doc.metadata['retrieval_rank'] = i + 1
-            doc.metadata['retrieval_method'] = method
+            doc.metadata['retrieval_method'] = "hybrid"
 
     def _vector_only_retrieval(self, query: str, k: int) -> List[Document]:
         """Fallback to vector search only."""
         try:
             logger.warning("Falling back to vector-only retrieval")
-            results = self.vector_retriever.get_relevant_documents(query)
-            return results[:k]
+            results = self.vector_retriever.invoke(query)
+            results = results[:k]
+            self._add_retrieval_metadata(results)
+            return results
         except Exception as e:
             logger.error("Vector-only retrieval failed", error=str(e))
             return []
 
     def get_retrieval_stats(self) -> Dict[str, Any]:
         """Get statistics about the retrieval system."""
-        is_ensemble = isinstance(self.retriever, EnsembleRetriever)
+        is_ensemble = self._uses_ensemble
         has_bm25 = False
         if is_ensemble:
-            has_bm25 = any(isinstance(r, (BM25Retriever, BM25FallbackRetriever)) for r in self.retriever.retrievers)
+            retrievers = getattr(self.retriever, "retrievers", getattr(self.retriever, "_retrievers", []))
+            has_bm25 = any(isinstance(r, (BM25Retriever, BM25FallbackRetriever)) for r in retrievers)
 
         return {
             "total_documents": len(self.documents),
             "retrieval_k": self.k,
             "retriever_type": self.retriever.__class__.__name__,
             "is_ensemble": is_ensemble,
+            "has_ensemble": is_ensemble,
             "has_bm25": has_bm25,
         }
 

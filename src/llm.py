@@ -7,7 +7,6 @@ import re
 import time
 from threading import Lock
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from urllib.parse import quote
 
 from groq import Groq
 from langchain.schema import Document
@@ -252,30 +251,32 @@ class EnhancedRAGChain:
             "k": retriever_k,
         }
 
-        # Initialize hybrid retriever
-        try:
-            self.retriever = HybridRetriever(
-                vector_store,
-                documents,
-                config=config,
-            )
-            logger.info("Initialized hybrid retriever", num_documents=len(documents))
-        except Exception as e:
-            logger.error("Failed to initialize hybrid retriever", error=str(e))
-            # Fallback to vector retriever only
-            self.retriever = vector_store.as_retriever(search_kwargs={'k': retriever_k})
-        
-        # Initialize advanced retriever for context-aware queries
+        # Initialize advanced retriever (extends HybridRetriever, so serves both roles)
         try:
             self.advanced_retriever = AdvancedRetriever(
                 vector_store,
                 documents,
                 config=config,
             )
+            # Use the advanced retriever as the default retriever too,
+            # avoiding duplicate BM25/ensemble initialization.
+            self.retriever = self.advanced_retriever
+            logger.info("Initialized hybrid retriever", num_documents=len(documents))
             logger.info("Initialized advanced retriever")
         except Exception as e:
-            logger.warning("Failed to initialize advanced retriever", error=str(e))
-            self.advanced_retriever = None
+            logger.error("Failed to initialize advanced retriever, trying hybrid only", error=str(e))
+            try:
+                self.retriever = HybridRetriever(
+                    vector_store,
+                    documents,
+                    config=config,
+                )
+                self.advanced_retriever = None
+                logger.info("Initialized hybrid retriever (fallback)", num_documents=len(documents))
+            except Exception as e2:
+                logger.error("Failed to initialize hybrid retriever", error=str(e2))
+                self.retriever = vector_store.as_retriever(search_kwargs={'k': retriever_k})
+                self.advanced_retriever = None
         
     def _handle_direct_query(self, question: str) -> Optional[Dict[str, Any]]:
         """
@@ -353,7 +354,7 @@ class EnhancedRAGChain:
                 if hasattr(retriever, "retrieve"):
                     documents = retriever.retrieve(question, k=retriever_k_to_use)
                 else:
-                    documents = retriever.get_relevant_documents(question)
+                    documents = retriever.invoke(question)
                     if retriever_k_to_use:
                         documents = documents[:retriever_k_to_use]
 

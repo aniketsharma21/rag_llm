@@ -1,4 +1,4 @@
-name: rag_llm
+name: dl_gpu_min
 channels:
   - conda-forge
 dependencies:

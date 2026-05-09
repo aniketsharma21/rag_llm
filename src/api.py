@@ -339,6 +339,17 @@ class ConnectionManager:
         self._active_tasks.pop(websocket, None)
 manager = ConnectionManager()
 
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint returning API information."""
+    return {
+        "name": "RAG Pipeline API",
+        "version": "0.2.0",
+        "status": "running",
+        "docs_url": "/docs",
+    }
+
 # Health check endpoint
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
@@ -637,6 +648,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if msg_type == "ping":
                 await manager.send_personal_message(json.dumps({"type": "pong"}), websocket)
+                continue
+
+            if msg_type == "pong":
                 continue
 
             if msg_type == "query":

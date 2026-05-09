@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import re
 import uuid
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
@@ -310,7 +311,7 @@ class IngestionService:
 
     def _persist_payload(self, filename: str, payload: bytes) -> str:
         file_extension = os.path.splitext(filename)[1]
-        safe_filename = filename.replace("..", "")
+        safe_filename = self._sanitize_filename(filename)
         permanent_file_path = os.path.join(RAW_DATA_DIR, safe_filename)
 
         counter = 1
@@ -328,4 +329,6 @@ class IngestionService:
 
     @staticmethod
     def _sanitize_filename(filename: str) -> str:
-        return filename.replace(" ", "_").replace("..", "")
+        base_name = os.path.basename(filename.replace("\\", "/")).strip()
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", base_name).strip("._")
+        return safe_name or "document"

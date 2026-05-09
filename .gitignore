@@ -34,10 +34,15 @@ ENV/
 
 # Project specific
 .env
+*.db
+config.yaml
 outputs/
 models_cache/
 chroma_store/
 data/processed/
+
+# Frontend local env (use .env.example as template)
+frontend/.env
 
 # Documentation
 docs/_build/
@@ -93,9 +98,5 @@ logs/
 ehthumbs.db
 Thumbs.db
 
-# Documentation
-/docs/_build
-
-# Data
-
+# Data (raw uploads are local-only)
 /data

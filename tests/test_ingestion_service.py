@@ -145,6 +145,30 @@ async def test_enqueue_upload_persists_file(repo_stubs):
 
 
 @pytest.mark.asyncio
+async def test_enqueue_upload_sanitizes_path_like_filename(repo_stubs, tmp_path):
+    service = IngestionService()
+    upload = UploadFile(filename="../unsafe\\report final.pdf", file=BytesIO(b"content"))
+
+    job_id, stored_path = await service.enqueue_upload(upload)
+
+    stored = Path(stored_path)
+    assert stored.parent == tmp_path / "raw"
+    assert stored.name == "report_final.pdf"
+    assert repo_stubs["jobs"][job_id]["file_name"] == "../unsafe\\report final.pdf"
+
+
+def test_persist_payload_generates_unique_safe_names(tmp_path):
+    service = IngestionService()
+    first = Path(service._persist_payload("nested/duplicate.txt", b"one"))
+    second = Path(service._persist_payload("nested/duplicate.txt", b"two"))
+
+    assert first.name == "duplicate.txt"
+    assert second.name == "duplicate_1.txt"
+    assert first.read_bytes() == b"one"
+    assert second.read_bytes() == b"two"
+
+
+@pytest.mark.asyncio
 async def test_process_job_success(monkeypatch, tmp_path, repo_stubs):
     file_path = tmp_path / "raw" / "doc.txt"
     file_path.parent.mkdir(parents=True, exist_ok=True)

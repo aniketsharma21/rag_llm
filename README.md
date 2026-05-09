@@ -25,7 +25,7 @@ A robust, modular, and production-oriented framework for building Retrieval-Augm
 -   **Hybrid Retrieval Engine** (`src/retrieval.py`): Semantic + BM25 ensemble retriever with conversation-aware context selection.
 -   **Advanced Prompting** (`src/prompt_templates.py`): Six specialized templates with automatic selection, context pruning, and source-aware formatting.
 -   **Structured Logging & Exceptions** (`src/logging_config.py`, `src/exceptions.py`): JSON logs, contextual metadata, and domain-specific exception hierarchy.
--   **Persistence Layer** (`src/database.py`): SQLAlchemy models for conversation/document history with CRUD helpers.
+-   **Persistence Layer** (`src/db/`): Async SQLAlchemy models and repositories for conversation, document, and ingest-job history.
 -   **Streaming UX** (`src/api.py`, `frontend/src/App.js`): Summaries stream before detail paragraphs, stop-generation is honored immediately, and chat messages merge role-tagged chunks automatically.
 -   **Service Layer Abstractions** (`src/services/ingestion_service.py`, `src/services/rag_service.py`): API endpoints now orchestrate ingestion and query flows through dedicated services with improved error handling and async patterns.
 -   **Shared Frontend Configuration** (`frontend/src/context/ConfigContext.js`): Centralized WebSocket/API configuration exposed through a React context provider, simplifying consumption in `App.js` and upload/chat components.
@@ -37,24 +37,42 @@ A robust, modular, and production-oriented framework for building Retrieval-Augm
 
 ```
 rag_llm/
-├── chroma_store/          # Vector database storage
-├── data/                  # Document storage (raw and processed)
-├── frontend/              # React + Tailwind CSS frontend
-├── src/                   # Python backend source code
-│   ├── api.py             # FastAPI application (REST + WebSocket)
-│   ├── config.py          # Configuration settings & environment loading
-│   ├── database.py        # Conversation/document persistence layer
-│   ├── embed_store.py     # Vector store operations
-│   ├── exceptions.py      # Custom exception hierarchy
-│   ├── ingest.py          # Document processing & loaders
-│   ├── llm.py             # LLM orchestration and prompt routing
-│   ├── logging_config.py  # Structured logging setup
-│   ├── prompt_templates.py# Advanced prompt templates & manager
-│   ├── retrieval.py       # Hybrid retriever implementations
-│   └── main.py            # CLI entry point for indexing/querying
-├── tests/                 # Test files
-├── environment.yml        # Conda environment definition
-└── requirements.txt       # Python dependencies
+├── chroma_store/            # Vector database storage (gitignored)
+├── data/                    # Document storage – raw & processed (gitignored)
+├── frontend/                # React + Tailwind CSS frontend
+│   ├── src/
+│   │   ├── components/      # UI components (Enhanced*, FileList, etc.)
+│   │   ├── context/         # React context providers (Config, WS, Theme)
+│   │   ├── routes/          # Page routes (Chat, Upload, AppLayout)
+│   │   └── App.js           # App shell and routing
+│   └── tailwind.config.js   # Tailwind CSS configuration
+├── src/                     # Python backend source code
+│   ├── api.py               # FastAPI application (REST + WebSocket)
+│   ├── cli.py               # Async CLI (ingest, query, status, warmup)
+│   ├── config.py            # Configuration settings & environment loading
+│   ├── db/                  # Async database layer
+│   │   ├── models.py        # SQLAlchemy ORM models
+│   │   ├── session.py       # Engine and session management
+│   │   └── repositories/    # CRUD repos (conversations, documents, jobs)
+│   ├── embed_store.py       # Vector store operations
+│   ├── exceptions.py        # Custom exception hierarchy
+│   ├── ingest.py            # Document processing & loaders
+│   ├── llm.py               # LLM orchestration and prompt routing
+│   ├── logging_config.py    # Structured logging setup
+│   ├── middleware/           # Observability middleware (Prometheus metrics)
+│   ├── prompt_templates.py  # Advanced prompt templates & manager
+│   ├── retrieval.py         # Hybrid retriever implementations
+│   ├── services/            # Business logic layer
+│   │   ├── ingestion_service.py  # Document ingestion orchestration
+│   │   ├── rag_service.py        # Query and retrieval orchestration
+│   │   └── task_queue.py         # Background task management
+│   ├── utils/               # Utility modules (db_inspector, source_formatting)
+│   └── main.py              # CLI entry point (delegates to cli.py)
+├── tests/                   # Test suite
+├── docs/                    # Sphinx documentation source
+├── models.yaml              # Groq model catalog
+├── environment.yml          # Conda environment definition
+└── requirements.txt         # Python dependencies
 ```
 
 ## 🚀 Quick Start
@@ -77,12 +95,12 @@ rag_llm/
         ```bash
         # Using conda (recommended)
         conda env create -f environment.yml
-        conda activate rag_llm
+        conda activate dl_gpu_min
 
         # Or with a standard virtual environment
         python -m venv venv
         source venv/bin/activate  # On Windows: venv\Scripts\activate
-        pip install -r requirements.txt -r requirements-clean.txt
+        pip install -r requirements.txt
         ```
     -   **Configure Environment Variables**: Runtime configuration is powered by the [`AppSettings`](src/config.py) Pydantic settings object, which merges `.env` values with optional `config.yaml` defaults. Create a `.env` file in the project root to supply required secrets.
         ```env
@@ -92,7 +110,7 @@ rag_llm/
         # Optional: For using OpenAI models
         OPENAI_API_KEY=your_openai_key_here
         ```
-        You can also populate `config.yaml` with non-secret defaults (for example, `chunk_size`, `embedding_model`). Both files are loaded automatically during startup.
+        You can optionally create a `config.yaml` in the project root with non-secret defaults (for example, `chunk_size`, `embedding_model`). Both files are loaded automatically during startup. Note: `config.yaml` is gitignored since it is user-specific.
 
         ```yaml
         # config.yaml (example)
@@ -144,13 +162,21 @@ rag_llm/
 
 You can also interact with the RAG pipeline directly via the command line.
 
--   **Index a document**:
+-   **Ingest a document**:
     ```bash
-    python -m src.main index --file path/to/your/document.pdf
+    python -m src.main ingest --file path/to/your/document.pdf
     ```
 -   **Query the system**:
     ```bash
     python -m src.main query "Your question here"
+    ```
+-   **Check job status**:
+    ```bash
+    python -m src.main status <job_id>
+    ```
+-   **Warm up the pipeline**:
+    ```bash
+    python -m src.main warmup
     ```
 
 ## 🧪 Testing

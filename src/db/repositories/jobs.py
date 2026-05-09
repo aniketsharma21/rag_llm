@@ -19,7 +19,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models import IngestJob
+from src.db.models import IngestJob, utc_now
 from src.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -213,6 +213,7 @@ class JobRepository:
             logger.debug("No updates provided for job", job_id=job_id)
             return await self.get(job_id)
 
+        values["updated_at"] = utc_now()
         stmt = update(IngestJob).where(IngestJob.job_id == job_id).values(**values).returning(IngestJob)
         result = await self._session.scalar(stmt)
         return _job_to_dict(result) if result else None

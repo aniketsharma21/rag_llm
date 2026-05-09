@@ -21,6 +21,9 @@ class _DummyVectorRetriever:
         self.queries.append(query)
         return list(self._docs)
 
+    def invoke(self, query, config=None):
+        return self.get_relevant_documents(query)
+
 
 class _DummyVectorStore:
     def __init__(self, docs):
@@ -44,6 +47,9 @@ class _DummyBM25Retriever:
         self.queries.append(query)
         return list(self._docs)
 
+    def invoke(self, query, config=None):
+        return self.get_relevant_documents(query)
+
 
 class _DummyEnsembleRetriever:
     def __init__(self, retrievers, weights):
@@ -57,6 +63,9 @@ class _DummyEnsembleRetriever:
         for retriever in self._retrievers:
             docs.extend(retriever.get_relevant_documents(query))
         return docs
+
+    def invoke(self, query, config=None):
+        return self.get_relevant_documents(query)
 
 
 @pytest.fixture

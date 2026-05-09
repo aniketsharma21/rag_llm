@@ -241,6 +241,17 @@ export const WebSocketProvider = ({ children }) => {
         return;
       }
 
+      if (payload.type === 'ping') {
+        try {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'pong' }));
+          }
+        } catch (error) {
+          console.error('Failed to send pong:', error);
+        }
+        return;
+      }
+
       if (payload.type === 'pong') {
         return;
       }

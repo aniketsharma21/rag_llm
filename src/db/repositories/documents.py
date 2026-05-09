@@ -19,7 +19,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models import Document
+from src.db.models import Document, utc_now
 from src.exceptions import DocumentProcessingError
 from src.logging_config import get_logger
 
@@ -168,7 +168,7 @@ class DocumentRepository:
         stmt = (
             update(Document)
             .where(Document.id == document_id)
-            .values(chunks_count=chunks_count, is_processed=True)
+            .values(chunks_count=chunks_count, is_processed=True, processed_at=utc_now())
             .returning(Document)
         )
         result = await self._session.scalar(stmt)

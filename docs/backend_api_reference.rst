@@ -15,11 +15,6 @@ This section provides a detailed, auto-generated API reference for the key Pytho
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: src.database
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 .. automodule:: src.embed_store
    :members:
    :undoc-members:
@@ -46,6 +41,16 @@ This section provides a detailed, auto-generated API reference for the key Pytho
    :show-inheritance:
 
 .. automodule:: src.retrieval
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: src.db.models
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: src.db.session
    :members:
    :undoc-members:
    :show-inheritance:

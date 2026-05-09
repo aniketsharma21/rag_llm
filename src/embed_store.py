@@ -200,6 +200,9 @@ def build_vector_store(chunks):
             )
             logger.info("Created new vector store and added chunks.", chunks_count=len(chunks))
 
+        persist = getattr(vectordb, "persist", None)
+        if callable(persist):
+            persist()
         _persist_embedding_config(_current_embedding_signature())
         return vectordb
     except Exception as exc:
