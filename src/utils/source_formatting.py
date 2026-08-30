@@ -281,6 +281,8 @@ def clean_answer_text(answer: str) -> str:
         return ""
 
     cleaned = answer.strip()
+    cleaned = re.sub(r"<thinking>.*?</thinking>", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"<analysis>.*?</analysis>", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
     cleaned = re.sub(r"\n+Sources?:.*$", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned

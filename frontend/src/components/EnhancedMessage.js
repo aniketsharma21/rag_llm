@@ -1,48 +1,71 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { UserIcon, CpuChipIcon, ChevronDownIcon, DocumentTextIcon } from '@heroicons/react/24/solid';
+import { ChevronDownIcon, DocumentTextIcon, ClipboardIcon, CheckIcon } from '@heroicons/react/24/solid';
 import ReactMarkdown from 'react-markdown';
 
-const EnhancedMessage = ({ message }) => {
+const EnhancedMessage = ({ message, onRegenerate }) => {
   const isUser = message.sender === 'user';
-  const isAI = message.sender === 'ai';
+  const isAI = message.sender === 'ai' || message.sender === 'bot';
+  const isSystem = message.sender === 'system';
   const [showSources, setShowSources] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const copyAnswer = async () => {
+    try {
+      await navigator.clipboard.writeText(message.text || '');
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch (error) {
+      console.error('Failed to copy answer', error);
+    }
+  };
+
+  const previewSource = (source) => {
+    const previewUrl = source.preview_url || source.previewUrl;
+    if (previewUrl) {
+      window.open(previewUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  if (isSystem) {
+    return (
+      <div className="flex justify-center">
+        <div className="max-w-xl rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-center text-xs text-gray-600 dark:border-neutral-700 dark:bg-neutral-800 dark:text-gray-300">
+          {message.text}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className={`flex gap-6 ${isUser ? 'flex-row-reverse' : ''} group`}>
-      {/* Avatar */}
-      <div className={`
-        flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center shadow-sm
-        ${isUser 
-          ? 'bg-gradient-to-br from-primary-500 to-primary-600 text-white' 
-          : 'bg-white dark:bg-gray-800 text-primary-600 dark:text-primary-400 border border-gray-200 dark:border-gray-700'
-        }
-      `}>
-        {isUser ? (
-          <UserIcon className="w-5 h-5" />
-        ) : (
-          <CpuChipIcon className="w-5 h-5" />
-        )}
-      </div>
-
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} group`}>
       {/* Message Content */}
-      <div className={`flex-1 max-w-3xl ${isUser ? 'text-right' : ''}`}>
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-gray-400 dark:text-gray-500 px-1">
-            {isUser ? 'You' : 'AI Assistant'}
-          </span>
+      <div className={`${isUser ? 'max-w-[80%] text-right' : 'w-full text-left'}`}>
+        <div className="flex flex-col gap-2">
+          {isAI && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">RAG Assistant</span>
+              <div className="flex items-center gap-3">
+                {onRegenerate && <button type="button" onClick={onRegenerate} className="text-xs text-gray-500 hover:text-emerald-600">Regenerate</button>}
+                <button type="button" onClick={copyAnswer} className="flex items-center gap-1 text-xs text-gray-500 hover:text-emerald-600" aria-label="Copy answer">
+                  {copied ? <CheckIcon className="h-4 w-4" /> : <ClipboardIcon className="h-4 w-4" />}
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            </div>
+          )}
           
           <div className={`
-            inline-block px-6 py-4 rounded-2xl shadow-sm text-left
+            text-left
             ${isUser 
-              ? 'bg-gradient-to-br from-primary-600 to-primary-700 text-white rounded-tr-sm' 
-              : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-tl-sm'
+              ? 'inline-block rounded-3xl bg-[#f4f4f4] dark:bg-[#2f2f2f] px-5 py-3 text-gray-900 dark:text-gray-100' 
+              : 'w-full text-gray-900 dark:text-gray-100'
             }
           `}>
             {isUser ? (
               <p className="text-base leading-relaxed">{message.text}</p>
             ) : (
-              <div className="prose prose-zinc dark:prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-gray-900 prose-pre:border prose-pre:border-gray-800">
+              <div className="prose prose-zinc dark:prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-gray-950 prose-pre:border prose-pre:border-gray-800">
                 <ReactMarkdown>{message.text}</ReactMarkdown>
               </div>
             )}
@@ -54,7 +77,7 @@ const EnhancedMessage = ({ message }) => {
           <div className="mt-3">
             <button
               onClick={() => setShowSources(!showSources)}
-              className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+              className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
             >
               <ChevronDownIcon className={`w-3 h-3 transition-transform ${showSources ? 'rotate-180' : ''}`} />
               {message.sources.length} Sources Referenced
@@ -75,10 +98,11 @@ const EnhancedMessage = ({ message }) => {
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: index * 0.05 }}
-                        className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:border-primary-300 dark:hover:border-primary-700 transition-colors cursor-pointer group/source"
+                        onClick={() => previewSource(source)}
+                        className={`bg-gray-50 dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 rounded-xl p-3 hover:border-emerald-300 dark:hover:border-emerald-700 transition-colors ${source.preview_url || source.previewUrl ? 'cursor-pointer group/source' : ''}`}
                       >
                         <div className="flex items-start gap-3">
-                          <div className="p-1.5 bg-gray-100 dark:bg-gray-700 rounded-md text-gray-500 dark:text-gray-400 group-hover/source:text-primary-600 dark:group-hover/source:text-primary-400 transition-colors">
+                          <div className="p-1.5 bg-white dark:bg-neutral-700 rounded text-gray-500 dark:text-gray-400 group-hover/source:text-emerald-600 dark:group-hover/source:text-emerald-400 transition-colors">
                             <DocumentTextIcon className="w-4 h-4" />
                           </div>
                           <div>
@@ -105,11 +129,11 @@ const EnhancedMessage = ({ message }) => {
         )}
 
         {/* Metadata */}
-        <div className={`mt-2 text-xs text-gray-300 dark:text-gray-600 flex items-center gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
+        <div className={`mt-2 text-xs text-gray-300 dark:text-neutral-600 flex items-center gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
           <span>{new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
           {message.confidence_score && (
             <>
-              <span>•</span>
+              <span>&bull;</span>
               <span className={message.confidence_score > 0.8 ? 'text-green-500' : 'text-amber-500'}>
                 {Math.round(message.confidence_score * 100)}% Confidence
               </span>

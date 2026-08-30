@@ -1,105 +1,54 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { 
-  SparklesIcon, 
-  DocumentTextIcon, 
-  ChatBubbleBottomCenterTextIcon,
-  LightBulbIcon 
-} from '@heroicons/react/24/outline';
+import { ArrowUpRightIcon } from '@heroicons/react/24/outline';
 import { useWebSocket } from '../context/WebSocketContext';
 
 const WelcomeScreen = () => {
   const { sendMessage } = useWebSocket();
 
-  const features = [
-    {
-      icon: DocumentTextIcon,
-      title: 'Analyze Documents',
-      description: 'Upload PDFs, DOCX, or TXT files and get instant insights.'
-    },
-    {
-      icon: ChatBubbleBottomCenterTextIcon,
-      title: 'Contextual Chat',
-      description: 'Ask questions and get answers based on your specific data.'
-    },
-    {
-      icon: SparklesIcon,
-      title: 'AI Powered',
-      description: 'Leveraging advanced LLMs for accurate and helpful responses.'
-    }
-  ];
-
   const suggestions = [
-    "Summarize the key points of the last uploaded document",
-    "What are the main risks identified in the contract?",
-    "Explain the technical architecture described",
+    "Summarize the latest uploaded document",
+    "Find the main risks and cite the source",
+    "Explain this document like I am new to the topic",
     "Compare the financial results with the previous quarter"
   ];
 
   return (
-    <div className="flex flex-col items-center justify-center h-full max-w-4xl mx-auto px-4 py-12">
+    <div className="flex flex-col items-center justify-start h-full max-w-3xl mx-auto px-4 pb-20 pt-[14vh]">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="text-center mb-12"
+        className="mb-6 text-center"
       >
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 mb-6 shadow-glow-sm">
-          <SparklesIcon className="w-8 h-8" />
-        </div>
-        <h1 className="text-4xl font-display font-bold text-gray-900 dark:text-white mb-4 tracking-tight">
-          Welcome to RAG Assistant
+        <h1 className="text-3xl font-display font-semibold text-gray-900 dark:text-gray-100 mb-3 tracking-tight">
+          How can I help with your documents?
         </h1>
-        <p className="text-lg text-gray-500 dark:text-gray-400 max-w-2xl mx-auto leading-relaxed">
-          Your personal AI research assistant. Upload documents and start a conversation to unlock insights instantly.
+        <p className="text-sm text-gray-500 dark:text-gray-400 max-w-lg mx-auto leading-relaxed">
+          Ask a question, request a summary, or use the knowledge base to ground responses in your uploaded files.
         </p>
       </motion.div>
 
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2, duration: 0.5 }}
-        className="grid md:grid-cols-3 gap-6 w-full mb-12"
+        className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full"
       >
-        {features.map((feature, index) => (
-          <div 
+        {suggestions.map((suggestion, index) => (
+          <button
             key={index}
-            className="p-6 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow"
+            onClick={() => sendMessage(suggestion)}
+            className="group min-h-[86px] rounded-2xl border border-gray-300 bg-gray-50 px-4 py-3 text-left hover:bg-gray-100 dark:border-neutral-700 dark:bg-[#2f2f2f] dark:hover:bg-neutral-800 transition-colors"
           >
-            <feature.icon className="w-8 h-8 text-primary-500 mb-4" />
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-              {feature.title}
-            </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
-              {feature.description}
-            </p>
-          </div>
-        ))}
-      </motion.div>
-
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.4 }}
-        className="w-full max-w-2xl"
-      >
-        <p className="text-sm font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-4 text-center">
-          Try asking
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {suggestions.map((suggestion, index) => (
-            <button
-              key={index}
-              onClick={() => sendMessage(suggestion)}
-              className="flex items-center gap-3 p-3 text-left bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:border-primary-400 dark:hover:border-primary-500 hover:shadow-sm transition-all group"
-            >
-              <LightBulbIcon className="w-5 h-5 text-gray-400 group-hover:text-primary-500 transition-colors" />
-              <span className="text-sm text-gray-600 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
+            <div className="flex h-full items-start justify-between gap-3">
+              <span className="text-sm leading-5 text-gray-700 dark:text-gray-200">
                 {suggestion}
               </span>
-            </button>
-          ))}
-        </div>
+              <ArrowUpRightIcon className="mt-0.5 h-4 w-4 flex-shrink-0 text-gray-300 transition-colors group-hover:text-gray-500 dark:text-neutral-600 dark:group-hover:text-gray-300" />
+            </div>
+          </button>
+        ))}
       </motion.div>
     </div>
   );

@@ -163,6 +163,35 @@ export const ConversationStoreProvider = ({ children }) => {
     }
   }, [appendSystemMessage, fetchConversations]);
 
+  const createConversation = useCallback(async (title) => {
+    const response = await fetch(`${apiBaseUrl}/conversations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to create conversation (${response.status})`);
+    }
+    const conversation = await response.json();
+    setCurrentConversationId(conversation.id);
+    await fetchConversations({ force: true });
+    return conversation.id;
+  }, [apiBaseUrl, fetchConversations]);
+
+  const deleteConversation = useCallback(async (conversationId) => {
+    const response = await fetch(`${apiBaseUrl}/conversations/${conversationId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to delete conversation (${response.status})`);
+    }
+    if (currentConversationId === conversationId) {
+      setCurrentConversationId(null);
+      setMessages([]);
+    }
+    await fetchConversations({ force: true });
+  }, [apiBaseUrl, currentConversationId, fetchConversations]);
+
   useEffect(() => {
     if (typeof document !== 'undefined') {
       document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -459,6 +488,8 @@ export const ConversationStoreProvider = ({ children }) => {
       searchQuery,
       setSearchQuery,
       refreshConversations,
+      createConversation,
+      deleteConversation,
       isConversationsLoading,
 
       // Theme & settings
@@ -494,6 +525,8 @@ export const ConversationStoreProvider = ({ children }) => {
       selectConversation,
       searchQuery,
       refreshConversations,
+      createConversation,
+      deleteConversation,
       isConversationsLoading,
       theme,
       toggleTheme,

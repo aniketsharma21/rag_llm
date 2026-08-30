@@ -29,7 +29,7 @@ const AppProviders = ({ children }) => (
 const App = () => {
   return (
     <AppProviders>
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-blue-50/20 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+      <div className="min-h-screen bg-white dark:bg-[#212121]">
         <Router>
           <AnimatePresence mode="wait">
             <Routes>
@@ -50,8 +50,8 @@ const App = () => {
               background: 'var(--chat-surface)',
               color: 'var(--chat-text)',
               border: '1px solid var(--chat-border)',
-              borderRadius: '12px',
-              padding: '16px',
+              borderRadius: '8px',
+              padding: '12px 14px',
               fontSize: '14px',
               fontWeight: '500',
               boxShadow: 'var(--chat-shadow)',

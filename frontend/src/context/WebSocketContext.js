@@ -20,6 +20,9 @@ export const WebSocketProvider = ({ children }) => {
     addMessage,
     updateMessageById,
     addUserMessage,
+    createConversation,
+    currentConversationId,
+    refreshConversations,
     settings,
     stopAllJobPollers,
     setConnectionNotice,
@@ -35,6 +38,7 @@ export const WebSocketProvider = ({ children }) => {
 
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [isLoading, setIsLoading] = useState(false);
+  const [generationStatus, setGenerationStatus] = useState('Generating');
 
   const flushPendingMessages = useCallback(() => {
     const socket = wsRef.current;
@@ -160,10 +164,13 @@ export const WebSocketProvider = ({ children }) => {
       }
 
       setIsLoading(false);
+      setGenerationStatus('Generating');
+      setConnectionNotice(null);
       currentResponseIdRef.current = null;
       lastCompletionRef.current = { content: finalContent, timestamp: now };
+      refreshConversations().catch(() => {});
     },
-    [addMessage, updateMessageById],
+    [addMessage, refreshConversations, setConnectionNotice, updateMessageById],
   );
 
   const connectWebSocket = useCallback(() => {
@@ -212,14 +219,17 @@ export const WebSocketProvider = ({ children }) => {
       if (payload.type === 'status') {
         if (payload.status === 'processing') {
           setIsLoading(true);
+          setGenerationStatus(payload.message || 'Generating');
         } else if (payload.status === 'stopped') {
           setIsLoading(false);
+          setGenerationStatus('Generating');
           currentResponseIdRef.current = null;
           appendSystemMessage('Generation stopped.');
         } else if (payload.status === 'connected') {
           setConnectionStatus('connected');
         } else if (payload.status === 'idle' || payload.status === 'completed') {
           setIsLoading(false);
+          setGenerationStatus('Generating');
         }
         return;
       }
@@ -273,9 +283,13 @@ export const WebSocketProvider = ({ children }) => {
 
       wsRef.current = null;
       setConnectionStatus('disconnected');
+      // A connection can close while a response is in flight.  Without
+      // resetting this state, the input remains disabled and the UI appears
+      // to be stuck on "Generating" until a later successful response.
+      setIsLoading(false);
       stopAllJobPollers();
       currentResponseIdRef.current = null;
-      setConnectionNotice('Connection lost. Attempting to reconnect…');
+      setConnectionNotice('Connection lost. Attempting to reconnect...');
 
       reconnectAttemptsRef.current += 1;
       const delay = Math.min(
@@ -298,6 +312,7 @@ export const WebSocketProvider = ({ children }) => {
     handleChunkMessage,
     handleCompleteMessage,
     maxReconnectDelay,
+    setConnectionNotice,
     stopAllJobPollers,
     websocketUrl,
   ]);
@@ -321,7 +336,7 @@ export const WebSocketProvider = ({ children }) => {
       }
       setConnectionNotice(null);
     };
-  }, [connectWebSocket]);
+  }, [connectWebSocket, setConnectionNotice]);
 
   const sendPayload = useCallback((payload) => {
     const socket = wsRef.current;
@@ -331,12 +346,12 @@ export const WebSocketProvider = ({ children }) => {
     }
 
     pendingMessagesRef.current.push(payload);
-    setConnectionNotice('Reconnecting to server… your request will be sent automatically.');
+    setConnectionNotice('Reconnecting to server... your request will be sent automatically.');
     connectWebSocket();
     return false;
-  }, [connectWebSocket]);
+  }, [connectWebSocket, setConnectionNotice]);
 
-  const sendMessage = useCallback((text) => {
+  const sendMessage = useCallback(async (text) => {
     const trimmed = text.trim();
     if (!trimmed) {
       return;
@@ -345,9 +360,19 @@ export const WebSocketProvider = ({ children }) => {
     addUserMessage(trimmed);
     currentResponseIdRef.current = null;
 
+    let conversationId = currentConversationId;
+    if (conversationId === null) {
+      try {
+        conversationId = await createConversation(trimmed.slice(0, 80));
+      } catch (error) {
+        appendSystemMessage('Unable to save this chat. Your answer will still be generated.');
+      }
+    }
+
     const payload = {
       type: 'query',
       question: trimmed,
+      conversation_id: conversationId,
       settings: {
         model: settings.model,
         num_docs: settings.numDocs,
@@ -363,12 +388,13 @@ export const WebSocketProvider = ({ children }) => {
       setConnectionStatus('connecting');
       appendSystemMessage('Waiting for server connection. Your request will be sent once connected.');
     }
-  }, [addUserMessage, appendSystemMessage, sendPayload, settings.model, settings.numDocs, setConnectionNotice]);
+  }, [addUserMessage, appendSystemMessage, createConversation, currentConversationId, sendPayload, settings.model, settings.numDocs, setConnectionNotice]);
 
   const stopGeneration = useCallback(() => {
     const payload = { type: 'stop_generation' };
     sendPayload(payload);
     setIsLoading(false);
+    setGenerationStatus('Generating');
     currentResponseIdRef.current = null;
   }, [sendPayload]);
 
@@ -380,10 +406,11 @@ export const WebSocketProvider = ({ children }) => {
   const value = useMemo(() => ({
     connectionStatus,
     isLoading,
+    generationStatus,
     sendMessage,
     stopGeneration,
     handleFeedback,
-  }), [connectionStatus, handleFeedback, isLoading, sendMessage, stopGeneration]);
+  }), [connectionStatus, generationStatus, handleFeedback, isLoading, sendMessage, stopGeneration]);
 
   return (
     <WebSocketContext.Provider value={value}>

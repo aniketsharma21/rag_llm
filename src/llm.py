@@ -244,6 +244,7 @@ class EnhancedRAGChain:
         self.vector_store = vector_store
         self.documents = documents
         self.conversation_history: List[Dict[str, Any]] = []
+        self._history_lock = Lock()
 
         config = {
             "semantic_weight": retriever_semantic_weight,
@@ -258,25 +259,12 @@ class EnhancedRAGChain:
                 documents,
                 config=config,
             )
-            # Use the advanced retriever as the default retriever too,
-            # avoiding duplicate BM25/ensemble initialization.
             self.retriever = self.advanced_retriever
-            logger.info("Initialized hybrid retriever", num_documents=len(documents))
-            logger.info("Initialized advanced retriever")
+            logger.info("Initialized advanced hybrid retriever", num_documents=len(documents))
         except Exception as e:
-            logger.error("Failed to initialize advanced retriever, trying hybrid only", error=str(e))
-            try:
-                self.retriever = HybridRetriever(
-                    vector_store,
-                    documents,
-                    config=config,
-                )
-                self.advanced_retriever = None
-                logger.info("Initialized hybrid retriever (fallback)", num_documents=len(documents))
-            except Exception as e2:
-                logger.error("Failed to initialize hybrid retriever", error=str(e2))
-                self.retriever = vector_store.as_retriever(search_kwargs={'k': retriever_k})
-                self.advanced_retriever = None
+            logger.error("Failed to initialize advanced hybrid retriever, falling back to vector-only", error=str(e))
+            self.retriever = vector_store.as_retriever(search_kwargs={'k': retriever_k})
+            self.advanced_retriever = None
         
     def _handle_direct_query(self, question: str) -> Optional[Dict[str, Any]]:
         """
@@ -563,9 +551,10 @@ class EnhancedRAGChain:
                 "assistant": answer,
                 "sources": sources,
             }
-            self.conversation_history.append(entry)
-            if len(self.conversation_history) > 50:
-                self.conversation_history = self.conversation_history[-50:]
+            with self._history_lock:
+                self.conversation_history.append(entry)
+                if len(self.conversation_history) > 50:
+                    self.conversation_history = self.conversation_history[-50:]
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning("Failed to record conversation history", error=str(exc))
 

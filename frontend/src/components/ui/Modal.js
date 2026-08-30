@@ -19,7 +19,7 @@ const Modal = ({
   if (!isOpen) return null;
 
   const maxWidthClass = sizeMap[size] || sizeMap.lg;
-  const bodyClasses = bodyClassName ?? 'h-[60vh] bg-gray-100 dark:bg-gray-800';
+  const bodyClasses = bodyClassName ?? 'h-[60vh] bg-gray-100 dark:bg-neutral-800';
 
   return (
     <div
@@ -27,10 +27,10 @@ const Modal = ({
       onClick={onClose}
     >
       <div
-        className={`relative w-full ${maxWidthClass} bg-white dark:bg-gray-900 rounded-2xl shadow-2xl overflow-hidden`}
+        className={`relative w-full ${maxWidthClass} bg-white dark:bg-[#2f2f2f] rounded-2xl shadow-xl overflow-hidden`}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-neutral-700">
           <div>
             {title && (
               <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
@@ -44,7 +44,7 @@ const Modal = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-full text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            className="p-2 rounded-full text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-neutral-800 transition-colors"
             aria-label="Close modal"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -54,7 +54,7 @@ const Modal = ({
         </div>
         <div className={bodyClasses}>{children}</div>
         {footer && (
-          <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+          <div className="px-4 py-3 border-t border-gray-200 dark:border-neutral-700 bg-gray-50 dark:bg-neutral-900">
             {footer}
           </div>
         )}

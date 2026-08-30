@@ -1,11 +1,11 @@
 import React from 'react';
 
-const baseClasses = 'inline-flex items-center justify-center font-medium transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 rounded-lg';
+const baseClasses = 'inline-flex items-center justify-center font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 rounded-md';
 
 const variants = {
-  primary: 'bg-blue-600 text-white hover:bg-blue-700 focus-visible:ring-blue-500',
-  secondary: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 focus-visible:ring-gray-400',
-  subtle: 'bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-200 dark:hover:bg-blue-800/60 focus-visible:ring-blue-400',
+  primary: 'bg-gray-900 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200 focus-visible:ring-gray-500 shadow-sm',
+  secondary: 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 dark:bg-[#2f2f2f] dark:border-neutral-700 dark:text-gray-200 dark:hover:bg-neutral-800 focus-visible:ring-gray-400',
+  subtle: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-200 dark:hover:bg-emerald-900/40 focus-visible:ring-emerald-400',
   ghost: 'bg-transparent text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 focus-visible:ring-gray-400',
 };
 

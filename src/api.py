@@ -487,6 +487,22 @@ async def _process_websocket_query(
         websocket,
     )
 
+    async def send_progress() -> None:
+        await asyncio.sleep(10)
+        while True:
+            await manager.send_personal_message(
+                json.dumps(
+                    {
+                        "type": "status",
+                        "status": "processing",
+                        "message": "Still working on your answer...",
+                    }
+                ),
+                websocket,
+            )
+            await asyncio.sleep(10)
+
+    progress_task = asyncio.create_task(send_progress())
     try:
         result = await app_service.query(
             question=question,
@@ -526,6 +542,10 @@ async def _process_websocket_query(
             json.dumps({"type": "error", "message": f"Error processing your request: {exc}"}),
             websocket,
         )
+    finally:
+        progress_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await progress_task
 
 
 # Query endpoint
@@ -622,14 +642,11 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             try:
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
-            except asyncio.TimeoutError:
-                logger.warning("WebSocket timeout", client=str(getattr(websocket, "client", "unknown")))
-                await manager.send_personal_message(
-                    json.dumps({"type": "error", "message": "Connection timeout. Closing connection."}),
-                    websocket,
-                )
-                break
+                # Keep accepting messages for the lifetime of the socket.  A
+                # generation task may legitimately run longer than a minute;
+                # timing out this receive loop cancels that task in ``finally``.
+                # The periodic application ping already detects stale clients.
+                data = await websocket.receive_text()
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected", client=str(getattr(websocket, "client", "unknown")))
                 break

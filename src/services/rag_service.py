@@ -78,7 +78,8 @@ class RAGService:
         This method is useful for forcing a reload of documents and vector store
         when the underlying data changes.
         """
-        self._enhanced_chain = None
+        with self._chain_lock:
+            self._enhanced_chain = None
         with self._cache_lock:
             self._chunk_cache.clear()
 
@@ -311,9 +312,10 @@ class RAGService:
     ) -> Dict[str, Any]:
         """Generate an answer for a question, using enhanced chain when possible."""
         history = chat_history or []
-        chain = self.get_enhanced_chain()
+        loop = asyncio.get_running_loop()
+        chain = await loop.run_in_executor(None, self.get_enhanced_chain)
         if chain:
-            result = self._run_enhanced_chain(chain, question, history)
+            result = await loop.run_in_executor(None, self._run_enhanced_chain, chain, question, history)
         else:
             logger.warning("Enhanced RAG chain unavailable, falling back to legacy pipeline")
             result = await self._run_fallback_pipeline(question)

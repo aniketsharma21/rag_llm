@@ -15,7 +15,7 @@ const UploadProgress = ({ jobs }) => {
       case 'failed':
         return <ExclamationCircleIcon className="w-5 h-5 text-red-500" />;
       case 'processing':
-        return <Cog6ToothIcon className="w-5 h-5 text-blue-500 animate-spin" />;
+        return <Cog6ToothIcon className="w-5 h-5 text-emerald-500 animate-spin" />;
       default:
         return <ClockIcon className="w-5 h-5 text-yellow-500" />;
     }
@@ -28,7 +28,7 @@ const UploadProgress = ({ jobs }) => {
       case 'failed':
         return 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20';
       case 'processing':
-        return 'border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20';
+        return 'border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30';
       default:
         return 'border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20';
     }
@@ -43,7 +43,7 @@ const UploadProgress = ({ jobs }) => {
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: 20 }}
           className={`
-            flex items-center space-x-4 p-4 rounded-xl border
+            flex items-center space-x-4 p-4 rounded-lg border
             ${getStatusColor(job.status)}
           `}
         >
@@ -65,8 +65,8 @@ const UploadProgress = ({ jobs }) => {
 
             {job.status === 'processing' && (
               <div className="mt-2">
-                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
-                  <div className="bg-blue-500 h-1.5 rounded-full animate-pulse w-1/3"></div>
+                <div className="w-full bg-gray-200 dark:bg-gray-800 rounded-full h-1.5">
+                  <div className="bg-emerald-600 h-1.5 rounded-full animate-pulse w-1/3"></div>
                 </div>
               </div>
             )}

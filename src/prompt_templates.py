@@ -77,6 +77,8 @@ class EnhancedPromptTemplates:
         "You are an AI assistant that answers questions using the provided context extracts.\n"
         "Use only information supported by the context. If the answer is not available, say 'The information is not provided in the context.'\n\n"
         "Your answer format:\n"
+        "1. First, think step-by-step in a <thinking> block to analyze the context and formulate your answer.\n"
+        "2. Then provide the final answer containing:\n"
         "- **Summary**: 1–2 sentences focusing on the question.\n"
         "- **Key Points**: Bullet list of facts directly from the context.\n"
         "- Avoid assumptions or unrelated details.\n\n"
@@ -98,6 +100,8 @@ class EnhancedPromptTemplates:
         "Cite source names inline in brackets (e.g., [Source: Report A]) only when necessary for clarity.\n"
         "If the answer is not present, reply: 'The information is not provided in the available context.'\n\n"
         "Answer format:\n"
+        "1. First, think step-by-step in a <thinking> block to analyze the context and identify sources.\n"
+        "2. Then provide the final answer containing:\n"
         "- **Summary**: Short overview addressing the question.\n"
         "- **Details**: Bullet list grouped by theme with inline citations.\n\n"
         "Example:\n"
@@ -125,6 +129,8 @@ class EnhancedPromptTemplates:
         "If contradictions appear, mention them briefly.\n"
         "Avoid adding a source list; inline references are enough.\n\n"
         "Answer format:\n"
+        "1. First, think step-by-step in a <thinking> block to synthesize the information across sources.\n"
+        "2. Then provide the final answer containing:\n"
         "- **Summary**: 1–2 sentence overview.\n"
         "- **Insights**: Thematic bullet lists merging information across sources.\n"
         "- **Conflicts**: Note disagreements if present.\n\n"
@@ -254,13 +260,27 @@ class PromptManager:
         if not chat_history:
             return "No previous conversation."
 
+        # If it's a list of role/content messages (individual message format)
+        if any("role" in msg for msg in chat_history):
+            history = chat_history[-(max_exchanges * 2):]  # Get last N exchanges (2 messages per exchange)
+            formatted = []
+            for msg in history:
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role == "user":
+                    formatted.append(f"User: {content}")
+                elif role == "assistant":
+                    formatted.append(f"Assistant: {content}")
+            return "\n".join(formatted) if formatted else "No previous conversation."
+
+        # Otherwise, assume exchange format ({"user": "...", "assistant": "..."})
         history = chat_history[-max_exchanges:]
         formatted = []
         for exch in history:
             if "user" in exch and "assistant" in exch:
                 formatted.append(f"User: {exch['user']}")
                 formatted.append(f"Assistant: {exch['assistant']}")
-        return "\n".join(formatted)
+        return "\n".join(formatted) if formatted else "No previous conversation."
 
 
 prompt_manager = PromptManager()

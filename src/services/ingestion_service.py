@@ -80,7 +80,6 @@ class IngestionService:
                 file_path=file_path,
                 error=str(exc),
             )
-            raise RuntimeError(f"Failed to clean up file: {file_path}") from exc
 
     async def enqueue_upload(self, file: UploadFile) -> Tuple[str, str]:
         """Process an uploaded file and enqueue it for background processing.

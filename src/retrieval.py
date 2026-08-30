@@ -10,8 +10,22 @@ from langchain.schema import Document, BaseRetriever
 from langchain_community.retrievers import BM25Retriever
 from rank_bm25 import BM25Okapi
 import structlog
+from sentence_transformers import CrossEncoder
+from src.config import RERANKER_MODEL
 
 logger = structlog.get_logger(__name__)
+
+# Initialize cross-encoder lazily
+_cross_encoder = None
+
+def get_cross_encoder():
+    global _cross_encoder
+    if _cross_encoder is None:
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info(f"Loading CrossEncoder: {RERANKER_MODEL}", device=device)
+        _cross_encoder = CrossEncoder(RERANKER_MODEL, device=device, max_length=512)
+    return _cross_encoder
 
 DEFAULT_CONFIG = {
     "semantic_weight": 0.7,
@@ -22,32 +36,6 @@ DEFAULT_CONFIG = {
 }
 
 
-class BM25FallbackRetriever(BaseRetriever):
-    """Fallback BM25 retriever using rank_bm25."""
-    def __init__(self, documents: List[Document], k: int):
-        super().__init__()
-        self.documents = documents
-        self.k = k
-        corpus = [doc.page_content.split() for doc in self.documents]
-        self.bm25 = BM25Okapi(corpus)
-
-    def _get_relevant_documents(self, query: str) -> List[Document]:
-        query_tokens = query.split()
-        scores = self.bm25.get_scores(query_tokens)
-        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:self.k]
-
-        results = []
-        for idx in top_indices:
-            if idx < len(self.documents):
-                doc = self.documents[idx]
-                if not hasattr(doc, 'metadata'):
-                    doc.metadata = {}
-                doc.metadata['bm25_score'] = float(scores[idx])
-                results.append(doc)
-        return results
-
-    async def _aget_relevant_documents(self, query: str) -> List[Document]:
-        raise NotImplementedError("BM25FallbackRetriever does not support async")
 
 
 class HybridRetriever:
@@ -109,18 +97,16 @@ class HybridRetriever:
             self.retriever = self.vector_retriever
 
     def _init_bm25_retriever(self) -> Optional[BaseRetriever]:
-        """Initializes the BM25 retriever with a fallback."""
+        """Initializes the BM25 retriever."""
+        if not self.documents:
+            logger.warning("No documents provided; skipping BM25 initialization.")
+            return None
         try:
             logger.info("Initializing BM25Retriever from langchain.")
             return BM25Retriever.from_documents(self.documents, k=self.k)
         except Exception as e:
-            logger.error("Failed to initialize BM25Retriever, trying fallback.", error=str(e))
-            try:
-                logger.info("Initializing BM25FallbackRetriever.")
-                return BM25FallbackRetriever(documents=self.documents, k=self.k)
-            except Exception as e2:
-                logger.error("Failed to initialize fallback BM25 retriever.", error=str(e2))
-                return None
+            logger.error("Failed to initialize BM25Retriever.", error=str(e))
+            return None
 
     def retrieve(self, query: str, k: Optional[int] = None) -> List[Document]:
         """
@@ -172,7 +158,7 @@ class HybridRetriever:
         has_bm25 = False
         if is_ensemble:
             retrievers = getattr(self.retriever, "retrievers", getattr(self.retriever, "_retrievers", []))
-            has_bm25 = any(isinstance(r, (BM25Retriever, BM25FallbackRetriever)) for r in retrievers)
+            has_bm25 = any(isinstance(r, BM25Retriever) for r in retrievers)
 
         return {
             "total_documents": len(self.documents),
@@ -253,33 +239,31 @@ class AdvancedRetriever(HybridRetriever):
         return reranked_docs[:k_to_use]
 
     def _rerank_documents(self, query: str, documents: List[Document]) -> List[Document]:
-        """Re-rank documents based on relevance scores."""
-        scored_docs = []
-        query_terms = set(query.lower().split())
-
-        for doc in documents:
-            doc_terms = set(doc.page_content.lower().split())
-            intersection = len(query_terms & doc_terms)
-            union = len(query_terms | doc_terms)
-            jaccard_score = intersection / union if union > 0 else 0.0
-            term_freq = sum(1 for term in query_terms if term in doc.page_content.lower())
-            tf_score = term_freq / len(query_terms) if query_terms else 0.0
-            combined_score = (jaccard_score * 0.6) + (tf_score * 0.4)
-
-            if hasattr(doc, 'metadata'):
-                bm25_score = doc.metadata.get('bm25_score', 0.0)
-                combined_score += bm25_score * 0.2
+        """Re-rank documents using CrossEncoder."""
+        if not documents:
+            return []
+        try:
+            encoder = get_cross_encoder()
+            pairs = [[query, doc.page_content] for doc in documents]
+            scores = encoder.predict(pairs)
             
-            scored_docs.append((doc, combined_score))
-
-        scored_docs.sort(key=lambda x: x[1], reverse=True)
-
-        reranked = []
-        for i, (doc, score) in enumerate(scored_docs):
-            if not hasattr(doc, 'metadata'):
-                doc.metadata = {}
-            doc.metadata['relevance_score'] = score
-            doc.metadata['retrieval_rank'] = i + 1
-            reranked.append(doc)
-        
-        return reranked
+            scored_docs = []
+            for doc, score in zip(documents, scores):
+                bm25_score = getattr(doc, 'metadata', {}).get('bm25_score', 0.0) if hasattr(doc, 'metadata') else 0.0
+                combined_score = float(score) + (bm25_score * 0.1)
+                scored_docs.append((doc, combined_score))
+                
+            scored_docs.sort(key=lambda x: x[1], reverse=True)
+            
+            reranked = []
+            for i, (doc, score) in enumerate(scored_docs):
+                if not hasattr(doc, 'metadata'):
+                    doc.metadata = {}
+                doc.metadata['relevance_score'] = score
+                doc.metadata['retrieval_rank'] = i + 1
+                reranked.append(doc)
+            
+            return reranked
+        except Exception as e:
+            logger.error("CrossEncoder reranking failed, falling back", error=str(e))
+            return documents

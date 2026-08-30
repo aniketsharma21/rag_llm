@@ -76,6 +76,18 @@ def test_run_enhanced_chain_formats_answer(monkeypatch):
     assert result["paragraphs"]
 
 
+def test_run_enhanced_chain_removes_model_reasoning(monkeypatch):
+    class ThinkingChain(DummyChain):
+        def query(self, **kwargs):
+            result = super().query(**kwargs)
+            result["answer"] = "<thinking>private reasoning</thinking>Visible answer [1]"
+            return result
+
+    result = RAGService()._run_enhanced_chain(ThinkingChain(), "What?", [])
+    assert "thinking" not in result["answer"].lower()
+    assert "Visible answer" in result["answer"]
+
+
 @pytest.mark.asyncio
 async def test_run_fallback_pipeline_requires_vector_store(monkeypatch):
     service = RAGService()

@@ -1,6 +1,6 @@
 import React from 'react';
 
-const baseStyles = 'p-1.5 rounded-full transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2';
+const baseStyles = 'p-1.5 rounded-md transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2';
 
 const variants = {
   subtle: 'bg-gray-100 hover:bg-gray-200 text-gray-600 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-300 focus-visible:ring-gray-400',

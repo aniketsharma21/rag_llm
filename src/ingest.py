@@ -6,7 +6,7 @@ Supports multiple file formats: PDF, Word, Text, Markdown, CSV, JSON, PowerPoint
 Ensures only changed documents are reprocessed using checksum verification.
 
 Supported File Types:
-- PDF (.pdf) - Using PyPDFLoader
+- PDF (.pdf) - Using UnstructuredPDFLoader (requires Poppler)
 - Word Documents (.docx) - Using UnstructuredWordDocumentLoader  
 - Text files (.txt) - Using TextLoader
 - Markdown (.md) - Using TextLoader with UTF-8 encoding
@@ -21,10 +21,61 @@ Usage:
 
 # src/ingest.py
 import os
+
+# Keep OneDNN disabled as a safety net for CPU-only fallback scenarios.
+# With paddlepaddle-gpu these are harmless but prevent crashes if GPU init fails.
+os.environ.setdefault("FLAGS_use_mkldnn", "0")
+os.environ.setdefault("FLAGS_use_onednn", "0")
+os.environ.setdefault("FLAGS_enable_onednn_fusion", "0")
+
+import torch  # Required first to prevent WinError 127 with PaddleOCR DLLs
 import pickle
 import hashlib
+
+# Inject local binary paths for Poppler
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_poppler_path = os.path.join(_project_root, "bin", "poppler", "poppler-24.02.0", "Library", "bin")
+os.environ["PATH"] = f"{_poppler_path};{os.environ.get('PATH', '')}"
+
+# Detect whether PaddlePaddle has GPU support
+_paddle_use_gpu = False
+try:
+    import paddle
+    _paddle_use_gpu = paddle.device.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0
+except Exception:
+    pass
+
+# Configure Unstructured to use PaddleOCR if available
+try:
+    import paddle
+    import unstructured_paddleocr
+    os.environ["OCR_AGENT"] = "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle"
+    
+    # Monkey-patch PaddleOCR to fix "eng" language mapping, enable GPU, and fix NameError
+    _original_init = unstructured_paddleocr.PaddleOCR.__init__
+    def _patched_init(self, **kwargs):
+        if kwargs.get("lang") == "eng":
+            kwargs["lang"] = "en"
+        # Enable GPU acceleration when available
+        if _paddle_use_gpu:
+            kwargs.setdefault("use_gpu", True)
+            kwargs.setdefault("use_angle_cls", True)
+        _original_init(self, **kwargs)
+    unstructured_paddleocr.PaddleOCR.__init__ = _patched_init
+    
+    # Fix NameError in unstructured
+    import unstructured.partition.utils.ocr_models.paddle_ocr as _paddle_ocr_module
+    from unstructured_inference.inference.layoutelement import LayoutElements
+    _paddle_ocr_module.LayoutElements = LayoutElements
+except ImportError:
+    # If paddle or unstructured_paddleocr is not available, we don't set OCR_AGENT
+    # so Unstructured will fall back to default PDF partitioning strategy (e.g. pdfminer)
+    pass
+
+
+
 from langchain_community.document_loaders import (
-    PyPDFLoader, 
+    UnstructuredPDFLoader, 
     UnstructuredWordDocumentLoader, 
     TextLoader,
     CSVLoader,
@@ -33,7 +84,8 @@ from langchain_community.document_loaders import (
 )
 import pandas as pd
 import json
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_experimental.text_splitter import SemanticChunker
+from src.embed_store import get_embedding_model
 from src.config import (
     BASE_DIR,
     RAW_DATA_DIR,
@@ -75,7 +127,7 @@ def _get_loader(file_path):
     
     try:
         if ext == ".pdf":
-            return PyPDFLoader(file_path)
+            return _create_pdf_loader(file_path)
         elif ext == ".docx":
             return UnstructuredWordDocumentLoader(file_path)
         elif ext in [".txt", ".md"]:
@@ -99,6 +151,57 @@ def _get_loader(file_path):
             f"Failed to create loader for {ext} file: {str(e)}",
             {"file_path": file_path, "file_type": ext, "error": str(e)}
         )
+
+def _create_pdf_loader(file_path):
+    """
+    Create a PDF loader with graceful OCR fallback.
+    
+    Tries UnstructuredPDFLoader with OCR (PaddleOCR) first. If PaddleOCR crashes
+    (e.g., due to OneDNN fused_conv2d errors), falls back to 'fast' strategy
+    which uses pdfminer for text extraction without OCR.
+    
+    Args:
+        file_path (str): Path to the PDF file.
+    Returns:
+        A loader whose .load() will attempt OCR first, then fall back.
+    """
+    class _RobustPDFLoader:
+        def __init__(self, path):
+            self._path = path
+        
+        def load(self):
+            # Attempt 1: full Unstructured pipeline with OCR
+            try:
+                loader = UnstructuredPDFLoader(
+                    self._path, mode="single", languages=["en"]
+                )
+                return loader.load()
+            except Exception as ocr_err:
+                logger.warning(
+                    "PDF OCR extraction failed, falling back to fast (pdfminer) strategy",
+                    file_path=self._path,
+                    error=str(ocr_err)[:200],
+                )
+            
+            # Attempt 2: fast strategy (pdfminer, no OCR)
+            try:
+                loader = UnstructuredPDFLoader(
+                    self._path, mode="single", strategy="fast"
+                )
+                return loader.load()
+            except Exception as fast_err:
+                logger.error(
+                    "PDF fast-strategy extraction also failed",
+                    file_path=self._path,
+                    error=str(fast_err)[:200],
+                )
+                raise DocumentProcessingError(
+                    f"All PDF extraction strategies failed for {os.path.basename(self._path)}",
+                    {"file_path": self._path, "ocr_error": str(ocr_err)[:200], "fast_error": str(fast_err)[:200]},
+                ) from fast_err
+    
+    return _RobustPDFLoader(file_path)
+
 
 def _create_excel_loader(file_path):
     """
@@ -181,8 +284,8 @@ def _calculate_checksum(file_path):
     """Calculates the SHA-256 checksum of a file."""
     hasher = hashlib.sha256()
     with open(file_path, 'rb') as f:
-        buf = f.read()
-        hasher.update(buf)
+        while chunk := f.read(8192):
+            hasher.update(chunk)
     return hasher.hexdigest()
 
 def process_document(file_path):
@@ -242,10 +345,8 @@ def process_document(file_path):
             {"file_path": file_path, "error": str(e)},
         ) from e
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP
-    )
+    embedding_model = get_embedding_model()
+    splitter = SemanticChunker(embedding_model)
     chunks = splitter.split_documents(docs)
 
     # Ensure chunk metadata references the original raw document

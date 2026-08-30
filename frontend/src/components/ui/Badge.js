@@ -1,6 +1,6 @@
 import React from 'react';
 
-const baseClasses = 'inline-flex items-center px-2 py-1 text-xs font-medium rounded-full';
+const baseClasses = 'inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md';
 
 const variants = {
   neutral: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200',

@@ -1,20 +1,20 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { 
-  ChatBubbleLeftIcon, 
-  DocumentPlusIcon,
-  PlusIcon,
-  SparklesIcon
-} from '@heroicons/react/24/outline';
+import { ChatBubbleLeftIcon, DocumentPlusIcon, MagnifyingGlassIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { useConversationStore } from '../context/ConversationStoreContext';
 
 const EnhancedSidebar = () => {
   const { 
-    conversations, 
+    conversations,
+    filteredConversations,
+    isConversationsLoading,
+    searchQuery,
+    setSearchQuery,
     startNewConversation, 
     selectConversation,
-    currentConversationId 
+    currentConversationId,
+    deleteConversation,
   } = useConversationStore();
 
   const navItems = [
@@ -23,42 +23,32 @@ const EnhancedSidebar = () => {
   ];
 
   return (
-    <div className="w-80 h-full flex flex-col bg-gray-50/50 dark:bg-gray-900/50 backdrop-blur-xl border-r border-gray-200 dark:border-gray-800">
+    <aside className="w-[260px] h-full flex flex-col bg-[#f9f9f9] dark:bg-[#171717] border-r border-gray-200 dark:border-neutral-800">
       {/* Header */}
-      <div className="p-6">
-        <div className="flex items-center gap-2 mb-8 px-2">
-          <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center shadow-glow-sm">
-            <SparklesIcon className="w-5 h-5 text-white" />
-          </div>
-          <span className="font-display font-bold text-xl tracking-tight text-gray-900 dark:text-white">
-            RAG Assistant
-          </span>
-        </div>
-
+      <div className="p-3">
         <motion.button
-          whileHover={{ scale: 1.02 }}
+          whileHover={{ y: -1 }}
           whileTap={{ scale: 0.98 }}
           onClick={startNewConversation}
-          className="w-full group relative flex items-center justify-center gap-2 px-4 py-3.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-primary-500/50 dark:hover:border-primary-500/50 rounded-xl shadow-sm hover:shadow-md transition-all duration-200"
+          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-neutral-700 rounded-xl hover:bg-gray-100 dark:hover:bg-neutral-800 transition-colors duration-150"
         >
-          <div className="absolute inset-0 bg-gradient-to-r from-primary-500/10 to-purple-500/10 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity" />
-          <PlusIcon className="w-5 h-5 text-primary-600 dark:text-primary-400" />
-          <span className="font-medium text-gray-700 dark:text-gray-200 group-hover:text-primary-700 dark:group-hover:text-primary-300">New Chat</span>
+          <PlusIcon className="w-4 h-4" />
+          <span>New chat</span>
         </motion.button>
       </div>
 
       {/* Navigation */}
-      <nav className="px-4 pb-6">
+      <nav className="px-3 pb-3">
         <div className="space-y-1">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) => `
-                relative flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200
+                relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-150
                 ${isActive 
-                  ? 'bg-white dark:bg-gray-800 text-primary-600 dark:text-primary-400 shadow-sm' 
-                  : 'text-gray-600 dark:text-gray-400 hover:bg-white/50 dark:hover:bg-gray-800/50 hover:text-gray-900 dark:hover:text-gray-200'
+                  ? 'bg-gray-200/70 dark:bg-neutral-800 text-gray-950 dark:text-gray-100' 
+                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-neutral-800 hover:text-gray-950 dark:hover:text-gray-100'
                 }
               `}
             >
@@ -70,55 +60,77 @@ const EnhancedSidebar = () => {
       </nav>
 
       {/* Conversations List */}
-      <div className="flex-1 overflow-y-auto px-4 pb-4 custom-scrollbar">
-        <div className="mb-3 px-4 flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-            Recent Chats
+      <div className="flex-1 overflow-y-auto px-3 pb-4 custom-scrollbar">
+        <div className="mb-2 px-3 flex items-center justify-between">
+          <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400">
+            Chats
           </h3>
         </div>
+        <div className="relative mb-3">
+          <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search chats"
+            className="w-full rounded-lg border border-transparent bg-white py-2 pl-9 pr-3 text-sm text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-gray-300 dark:bg-neutral-900 dark:text-gray-100 dark:focus:border-neutral-700"
+          />
+        </div>
         <div className="space-y-1">
-          {conversations.map((conversation) => (
-            <motion.button
+          {isConversationsLoading && conversations.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">Loading chats...</div>
+          ) : null}
+          {!isConversationsLoading && filteredConversations.length === 0 ? (
+            <div className="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">
+              {searchQuery ? 'No chats match your search.' : 'No saved chats yet.'}
+            </div>
+          ) : null}
+          {filteredConversations.map((conversation) => (
+            <motion.div
               key={conversation.id}
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
-              onClick={() => selectConversation(conversation.id)}
               className={`
-                group w-full text-left px-4 py-3 rounded-xl text-sm transition-all duration-200 border border-transparent
+                group flex w-full items-center gap-1 rounded-lg text-sm transition-colors duration-150
                 ${currentConversationId === conversation.id
-                  ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm border-gray-200 dark:border-gray-700'
-                  : 'text-gray-600 dark:text-gray-400 hover:bg-white/50 dark:hover:bg-gray-800/50 hover:text-gray-900 dark:hover:text-gray-200'
+                  ? 'bg-gray-200/70 dark:bg-neutral-800 text-gray-950 dark:text-gray-100'
+                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-neutral-800 hover:text-gray-950 dark:hover:text-gray-100'
                 }
               `}
             >
-              <div className="truncate font-medium">
-                {conversation.title || 'New Conversation'}
-              </div>
-              <div className="text-xs text-gray-400 mt-1 flex items-center gap-2">
-                <span>{new Date(conversation.created_at || Date.now()).toLocaleDateString()}</span>
-              </div>
-            </motion.button>
+              <button onClick={() => selectConversation(conversation.id)} className="min-w-0 flex-1 px-3 py-2.5 text-left">
+                <div className="truncate font-medium">{conversation.title || 'New Conversation'}</div>
+              </button>
+              <button
+                type="button"
+                aria-label={`Delete ${conversation.title || 'conversation'}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  deleteConversation(conversation.id).catch(() => {});
+                }}
+                className="mr-2 rounded p-1 text-gray-400 opacity-0 transition hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-950/30"
+              >
+                <TrashIcon className="h-4 w-4" />
+              </button>
+            </motion.div>
           ))}
         </div>
       </div>
 
       {/* User Profile / Footer */}
-      <div className="p-4 border-t border-gray-200 dark:border-gray-800">
-        <div className="flex items-center gap-3 px-2 py-2">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-primary-500 to-purple-500 flex items-center justify-center text-white text-xs font-bold">
-            US
+      <div className="p-3">
+        <div className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-gray-100 dark:hover:bg-neutral-800 transition-colors">
+          <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center text-white text-xs font-semibold">
+            U
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-              User Account
-            </p>
-            <p className="text-xs text-gray-500 truncate">
-              Pro Plan
+              Local workspace
             </p>
           </div>
         </div>
       </div>
-    </div>
+    </aside>
   );
 };
 

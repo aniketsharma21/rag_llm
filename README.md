@@ -138,20 +138,33 @@ rag_llm/
 
 ## 🖥️ Usage
 
-1.  **Start the Backend Server**
-    From the project root, run:
+1.  **Start the Application (Recommended - Single Terminal)**
+    From the project root, simply run:
     ```bash
-    uvicorn src.api:app --reload
+    python run.py
     ```
-    The backend API will be available at `http://localhost:8000`.
+    Or on Windows, you can double-click or run `run.bat`.
+    
+    This script will:
+    - Auto-install frontend dependencies (`npm install`) if `node_modules` is missing.
+    - Start the FastAPI backend and wait for it to be ready.
+    - Start the React frontend dev server (which opens your browser automatically).
+    - Stream logs from both servers into a single terminal window, prefixed with `[Backend]` and `[Frontend]`.
+    - Stop both servers cleanly when you press `Ctrl+C`.
 
-2.  **Start the Frontend Development Server**
-    In a **new terminal**, from the project root, run:
-    ```bash
-    cd frontend
-    npm start
-    ```
-    The web interface will be available at `http://localhost:3000`.
+2.  **Start the Components Separately (Optional)**
+    If you prefer starting them in separate terminals:
+    - **Backend Server**:
+      ```bash
+      uvicorn src.api:app --reload
+      ```
+      Available at `http://localhost:8000`.
+    - **Frontend Server**:
+      ```bash
+      cd frontend
+      npm start
+      ```
+      Available at `http://localhost:3000`.
 
 3.  **Upload Documents and Chat**
     -   Navigate to the "Upload Documents" page to drag & drop new files, monitor ingest status, and open the preview modal via the eye icon.

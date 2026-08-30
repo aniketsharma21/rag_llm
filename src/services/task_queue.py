@@ -69,7 +69,11 @@ class AsyncTaskQueue:
                 previous.cancel()
         task = asyncio.create_task(coroutine_factory())
         self._tasks[job_id] = task
-        task.add_done_callback(lambda t, jid=job_id: self._tasks.pop(jid, None))
+        
+        def _clean(t, jid=job_id):
+            if self._tasks.get(jid) is t:
+                self._tasks.pop(jid, None)
+        task.add_done_callback(_clean)
         return task
 
     def get(self, job_id: str) -> Optional[asyncio.Task[None]]:

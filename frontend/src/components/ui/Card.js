@@ -2,7 +2,7 @@ import React from 'react';
 
 const Card = ({ className = '', children, ...props }) => {
   const classes = [
-    'bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm',
+    'bg-white dark:bg-[#2f2f2f] border border-gray-200 dark:border-neutral-700 rounded-2xl shadow-sm',
     className,
   ]
     .filter(Boolean)

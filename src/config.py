@@ -95,7 +95,7 @@ class AppSettings(BaseSettings):
     llm_model: str = Field(default=_YAML_DEFAULTS.get("llm_model", "openai/gpt-oss-120b"))
     llm_temperature: float = Field(default=_YAML_DEFAULTS.get("llm_temperature", 0.8))
     llm_max_output_tokens: int = Field(default=_YAML_DEFAULTS.get("llm_max_output_tokens", 2048))
-    llm_request_timeout: Optional[int] = Field(default=_YAML_DEFAULTS.get("llm_request_timeout"))
+    llm_request_timeout: Optional[int] = Field(default=_YAML_DEFAULTS.get("llm_request_timeout", 60))
     llm_max_retries: int = Field(default=_YAML_DEFAULTS.get("llm_max_retries", 3))
 
     retriever_semantic_weight: float = Field(default=_YAML_DEFAULTS.get("retriever_semantic_weight", 0.7))
@@ -103,9 +103,11 @@ class AppSettings(BaseSettings):
     retriever_k: int = Field(default=_YAML_DEFAULTS.get("retriever_k", 5))
 
     embedding_backend: str = Field(default=_YAML_DEFAULTS.get("embedding_backend", "huggingface"))
-    embedding_model: str = Field(default=_YAML_DEFAULTS.get("embedding_model", "all-MiniLM-L6-v2"))
+    embedding_model: str = Field(default=_YAML_DEFAULTS.get("embedding_model", "BAAI/bge-base-en-v1.5"))
     embedding_endpoint: Optional[str] = Field(default=_YAML_DEFAULTS.get("embedding_endpoint"))
     embedding_api_key: Optional[str] = Field(default=_YAML_DEFAULTS.get("embedding_api_key"))
+
+    reranker_model: str = Field(default=_YAML_DEFAULTS.get("reranker_model", "cross-encoder/ms-marco-MiniLM-L-6-v2"))
 
     database_url: Optional[str] = Field(default=_YAML_DEFAULTS.get("database_url"))
 
@@ -249,3 +251,4 @@ RETRIEVER_K = settings.retriever_k
 EMBEDDING_BACKEND = settings.embedding_backend
 EMBEDDING_ENDPOINT = settings.embedding_endpoint
 EMBEDDING_API_KEY = settings.embedding_api_key
+RERANKER_MODEL = settings.reranker_model
